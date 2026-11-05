@@ -32,5 +32,3 @@ stratum_id
 
 X Make area not covered by the strata a separate stratum
 
-9.Point placement
-X Simple random within strata

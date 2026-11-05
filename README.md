@@ -23,10 +23,6 @@ national script that combines FAO/JRC raster values with a kriging-based descrip
 6. **Selects the sites** (`selectSampleSpatial`) and exports points, summary tables, figures and the strata as
    polygons, ready to be used in the SML tool.
 
-In the example run (`output/`), the final sample has 963 sites (682 newly sampled, 224 on the LUCAS grid,
-57 forced LUCAS points); with the spatial component the optimised allocation is 968.7 units against
-1341.7 for the non-spatial one. These figures rest on national variogram models that local data do not
-confirm (see the warnings in `_summary.txt`), so treat the gain with caution.
 
 ## Repository contents
 
@@ -58,5 +54,4 @@ troubleshooting.
 ## Using the result in the SML tool
 
 Copy `strata_SML.gpkg` to the tool's `Files/Strata/` folder and apply the settings in
-`parameters_values_for_SML_tool.txt` (soil-unit field `soil_unit`, strata field `stratum_id`, simple random
-placement within strata).
+`parameters_values_for_SML_tool.txt` (soil-unit field `soil_unit`, strata field `stratum_id`).
