@@ -1,0 +1,36 @@
+Input folders:
+Files/DSM, Files/Soil_Units, Files/SurveyData, Files/ExistingLocations, Files/Strata, Files/LUCAS
+
+1. Mean and Variance Source
+X DSM prediction maps
+
+2. DSM Descriptor Maps
+PH_1000m.tif  SOC_1000m.tif
+
+X Include DSM uncertainty 
+
+Select matching PI90 rasters
+PH_1000m_PI90.tif SOC_1000m_PI90.tif
+
+3. Soil unit file
+
+Test_6_soil_units_Italy.gpkg
+
+Soil unit ID field name
+soil_unit
+
+4.Stratification
+
+X Use optional stratification
+Stratification source
+X Use esisting stratification polygon
+Strata file
+strata_SML.gpkg
+
+Column name for stratum ID
+stratum_id
+
+X Make area not covered by the strata a separate stratum
+
+9.Point placement
+X Simple random within strata

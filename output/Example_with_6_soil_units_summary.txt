@@ -1,0 +1,103 @@
+SOIL MONITORING LEVEL (SML) - ITALY SAMPLING SITE EXAMPLE: RESULTS SUMMARY
+Run date            : 2026-11-05 08:58
+Scenario            : Example_with_6_soil_units
+Domains             : 6 soil units in 2 zones
+Target variables    : PH, SOC (CV target = 5% in every domain)
+Stratification vars : ARG, DEM
+Forced LUCAS points : 57
+use_spatial_fit     : TRUE
+
+==============================================================================
+1. VARIOGRAM FITTING (point-level soil survey, regression kriging, spherical model)
+==============================================================================
+R2 = goodness of fit of the spherical variogram (this is the 'fitting' used in the
+spatial variance); range = variogram range in km; trend = x + y + DEM.
+A zone with fewer than 30 valid survey points, or with a degenerate fit,
+uses the national model.
+
+                           scope variable R2 (fitting) range (km) n of model n valid in zone                    source
+                        National       PH        0.409      109.4       1414              NA                   own fit
+ Emilia orientale - delta del Po       PH        0.409      109.4       1414             100 national model (fallback)
+             Toscana meridionale       PH        0.409      109.4       1414              12 national model (fallback)
+                        National      SOC        0.492       80.3        824              NA                   own fit
+ Emilia orientale - delta del Po      SOC        0.492       80.3        824              61 national model (fallback)
+             Toscana meridionale      SOC        0.492       80.3        824              10 national model (fallback)
+
+==============================================================================
+2. OPTIMISATION WITHOUT SPATIAL COMPONENT (Phase 6: GA, fitting = 1, range = 0)
+==============================================================================
+Sample size per domain (optimised strata only; forced LUCAS census units excluded):
+
+ domain                            zone     soil unit strata sample size
+      1 Emilia orientale - delta del Po   BA_Cropland      1       198.1
+      2 Emilia orientale - delta del Po   BE_Cropland      4       217.8
+      3 Emilia orientale - delta del Po   DO_Cropland      3       139.0
+      4             Toscana meridionale 60.4_Cropland      5       164.2
+      5             Toscana meridionale   60.4_Forest      5       271.2
+      6             Toscana meridionale 60.7_Cropland      5       282.6
+
+Optimised strata total : 1273 units in 23 strata
+Forced LUCAS (census) : 57 units
+TOTAL (GA result)     : 1330 units
+
+==============================================================================
+3. OPTIMISATION WITH SPATIAL COMPONENT (Phase 6b)
+==============================================================================
+For each domain the strata found by the GA are re-allocated (Bethel) with the zone's
+fitting and range; the spatial version is kept only if it needs no more units than the
+non-spatial one recomputed on the same strata.
+
+ domain                            zone     soil unit fit PH fit SOC range PH km range SOC km n non-spatial n spatial  choice n spatial - n non-sp.
+      1 Emilia orientale - delta del Po   BA_Cropland  0.409   0.492       109.4         80.3         200.0     123.1 spatial                 -76.9
+      2 Emilia orientale - delta del Po   BE_Cropland  0.409   0.492       109.4         80.3         219.8     159.1 spatial                 -60.7
+      3 Emilia orientale - delta del Po   DO_Cropland  0.409   0.492       109.4         80.3         140.6      61.8 spatial                 -78.8
+      4             Toscana meridionale 60.4_Cropland  0.409   0.492       109.4         80.3         166.2     119.8 spatial                 -46.4
+      5             Toscana meridionale   60.4_Forest  0.409   0.492       109.4         80.3         274.1     192.2 spatial                 -81.9
+      6             Toscana meridionale 60.7_Cropland  0.409   0.492       109.4         80.3         284.0     255.8 spatial                 -28.2
+
+Domains where the spatial version was kept : 6 of 6
+TOTAL, GA result (non-spatial)              : 1330
+TOTAL, non-spatial recomputed (same strata) : 1341.7   (difference from GA = 11.7: solver noise between independent Bethel calls)
+TOTAL, final allocation after Phase 6b      : 968.7
+Gain of the spatial component               : 373 units (27.8% of the non-spatial total)
+
+==============================================================================
+4. WARNINGS
+==============================================================================
+* LOW FITTING: the variogram fitting (R2) is below 0.90 in 4 of 4 zone x variable fits (range 0.41-0.49). The fitting enters the spatial variance at the denominator, so with a low fitting the spatial component is expected to INCREASE the variance, i.e. to give a sample size not smaller than the non-spatial one. Treat any spatial gain with caution.
+
+* SPATIAL VERSION SELECTED DESPITE LOW FITTING: in 6 of 6 domains Phase 6b kept the spatial allocation (gain 373.0 units). This is not the expected behaviour for fitting < 0.90; check how fitting and range enter the spatial variance (the gain may come from the large range, ~80-109 km on 1 km cells, rather than from the fitting) before relying on it.
+
+* NATIONAL MODEL USED AT ZONE LEVEL: for 4 of 4 zone x variable fits the zone model could not be estimated (fewer than 30 valid survey points, or degenerate fit) and the national model was used. Zones affected: Emilia orientale - delta del Po; Toscana meridionale. The national spatial structure is not confirmed by local data.
+
+
+==============================================================================
+5. FINAL SAMPLE
+==============================================================================
+Total sites selected : 963
+  sampled           : 682
+  sampled (LUCAS grid): 224
+  LUCAS forced      : 57
+
+Expected CV per domain (target 5%), maximum over domains:
+  cv_PH : 0.0103
+  cv_SOC : 0.0498
+
+Sites per domain (domains with at least 5 cells are stratified):
+
+                                    dom_code                            zona     soil_unit n_cell dom_val n_tot n_lucas_grid n_lucas_forced
+ Emilia orientale - delta del Po*BA_Cropland Emilia orientale - delta del Po   BA_Cropland    697    TRUE   127           28              5
+ Emilia orientale - delta del Po*BE_Cropland Emilia orientale - delta del Po   BE_Cropland   6616    TRUE   189           42             30
+ Emilia orientale - delta del Po*DO_Cropland Emilia orientale - delta del Po   DO_Cropland    366    TRUE    63           13              2
+           Toscana meridionale*60.4_Cropland             Toscana meridionale 60.4_Cropland    682    TRUE   126           35              7
+             Toscana meridionale*60.4_Forest             Toscana meridionale   60.4_Forest   1259    TRUE   199           50              8
+           Toscana meridionale*60.7_Cropland             Toscana meridionale 60.7_Cropland    935    TRUE   259           56              5
+
+==============================================================================
+6. OTHER NOTES
+==============================================================================
+* Survey points inside the study area are few (see Phase 3): the zone variograms are not reliable.
+* The DEM raster is used only for the trend of the variogram fit; the DEM used to build the strata comes from the frame.
+* The CV of the target variables is computed on the model-predicted values and variances of the frame.
+
+Output files: Example_with_6_soil_units_units.csv, _allpoints.csv, _sample.csv, _figures.pdf, _variograms.pdf, .gpkg, .RData
