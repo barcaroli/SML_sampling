@@ -15,13 +15,17 @@ national script that combines FAO/JRC raster values with a kriging-based descrip
    take-all (census) stratum, and removes their cells from the frame that is actually sampled.
 3. **Fits variograms** (regression kriging, spherical model, trend `x + y + DEM`) on point-level survey data,
    nationally and per zone, to quantify spatial autocorrelation (fitting R² and range).
-4. **Optimises the stratification** with [SamplingStrata](https://CRAN.R-project.org/package=SamplingStrata):
+4. **Optimises the stratification** with [SamplingStrata](https://barcaroli.github.io/SamplingStrata/):
    spatial K-means initial solution, then a genetic algorithm with Bethel allocation, so that the
    coefficient of variation (CV) of the estimates of PH and SOC is at most **5 % in every domain**.
 5. **Decides per domain** whether taking spatial correlation into account (Phase 6b) reduces the sample size
    compared with the non-spatial baseline.
 6. **Selects the sites** (`selectSampleSpatial`) and exports points, summary tables, figures and the strata as
    polygons, ready to be used in the SML tool.
+   
+Note: use the last version (1.6) of SamplingStrata by installing it as follows:
+
+pak::pak("barcaroli/SamplingStrata")
 
 
 ## Repository contents
