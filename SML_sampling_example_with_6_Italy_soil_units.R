@@ -110,13 +110,29 @@
 #                             folder of the SML tool to use it there)
 #
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+# Install the required packages, if not yet installed
+# -----------------------------------------------------------------------------
+# CRAN packages ("parallel" is part of base R and needs no installation)
+cran_pkgs <- c("sp", "raster", "ggplot2", "dplyr", "tidyr", "clhs",
+               "sf", "terra", "readxl", "gstat", "doParallel", "pak")
+to_install <- cran_pkgs[!vapply(cran_pkgs, requireNamespace, logical(1), quietly = TRUE)]
+if (length(to_install) > 0) install.packages(to_install)
+
+# SamplingStrata: version 1.6 or later is required. If it is not available
+# (or older), install the current version from GitHub with pak.
+if (!requireNamespace("SamplingStrata", quietly = TRUE) ||
+    packageVersion("SamplingStrata") < "1.6") {
+  pak::pak("barcaroli/SamplingStrata")
+}
+
 library(sp)
 library(raster)
 library(ggplot2)
 library(dplyr)
 library(tidyr)
 library(SamplingStrata)
-library(bethel)
 library(clhs)
 library(sf)
 library(terra)

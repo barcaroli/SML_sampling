@@ -41,7 +41,7 @@ pak::pak("barcaroli/SamplingStrata")
 
 ## Requirements
 
-R (≥ 4.1) with the packages `sp`, `raster`, `ggplot2`, `dplyr`, `tidyr`, `SamplingStrata`, `bethel`, `clhs`,
+R (≥ 4.1) with the packages `sp`, `raster`, `ggplot2`, `dplyr`, `tidyr`, `SamplingStrata`, `clhs`,
 `sf`, `terra`, `readxl`, `gstat`, `parallel`, `doParallel`.
 
 ## Quick start
