@@ -413,40 +413,55 @@ hdr("4. WARNINGS")
 warn <- character(0)
 n_not <- sum(leg_out$reliability == "NOT RELIABLE")
 n_cau <- sum(leg_out$reliability == "USE WITH CAUTION")
+n_su <- nrow(leg_out)
+# Describe a subset of issues_tab (one row per soil unit x variable) as
+# "PH: 6 of 6 soil units; SOC: 5 of 6 soil units (all but BE_Cropland)".
+by_var <- function(sub) {
+  paste(sapply(vars_cont_y, function(v) {
+    su_v <- sub$soil_unit[sub$variable == v]
+    txt  <- sprintf("%s: %d of %d soil units", v, length(su_v), n_su)
+    if (length(su_v) > 0 && length(su_v) < n_su)
+      txt <- paste0(txt, " (", paste(su_v, collapse = ", "), ")")
+    txt
+  }), collapse = "; ")
+}
 low_fit <- issues_tab[grepl("^fitting", issues_tab$issues), ]
 if (nrow(low_fit) > 0) {
   fvals <- unlist(leg_out[, paste0("fitting_", vars_cont_y)])
   warn <- c(warn, sprintf(paste0(
-    "LOW FITTING: fitting below %.2f in %d of %d soil unit x variable combinations ",
-    "(values %.2f-%.2f). In the within-stratum variance of SamplingStrata the fitting divides ",
-    "the term of the predicted values, (z_i - z_j)^2 / fitting; a low fitting inflates that ",
-    "term, i.e. it says that the frame values explain little of the true variability."),
-    fitting_warn_threshold, nrow(low_fit), nrow(issues_tab), min(fvals), max(fvals)))
+    "LOW FITTING: fitting below %.2f for %s (values %.2f-%.2f). In the within-stratum ",
+    "variance of SamplingStrata the fitting divides the term of the predicted values, ",
+    "(z_i - z_j)^2 / fitting; a low fitting inflates that term, i.e. it says that the frame ",
+    "values explain little of the true variability."),
+    fitting_warn_threshold, by_var(low_fit), min(fvals), max(fvals)))
 }
 big_rng <- issues_tab[grepl("rho =", issues_tab$issues), ]
 if (nrow(big_rng) > 0) {
   rvals <- unlist(leg_out[, paste0("range_", vars_cont_y, "_km")])
   warn <- c(warn, sprintf(paste0(
-    "LARGE RANGE: in %d of %d soil unit x variable combinations the range (%.0f-%.0f km) is ",
-    "large compared with the mean distance inside the soil unit (%.0f-%.0f km), so rho > %.2f. ",
+    "LARGE RANGE: rho > %.2f for %s. The range (%.0f-%.0f km) is large compared with the ",
+    "mean distance inside the soil units (%.0f-%.0f km; see section 2 for each soil unit). ",
     "In the within-stratum variance the prediction-error term is ",
     "(s_i^2 + s_j^2 - 2 s_i s_j exp(-kappa d_ij / range)): when the range is much larger than ",
     "the distances inside a stratum, the errors are treated as almost perfectly correlated ",
     "and this term nearly cancels. The sample size then decreases because of the range, ",
     "independently of the fitting: a large range not supported by local data gives a reduction ",
     "that is not warranted."),
-    nrow(big_rng), nrow(issues_tab), min(rvals), max(rvals),
-    min(leg_out$mean_dist_km), max(leg_out$mean_dist_km), rho_warn_threshold))
+    rho_warn_threshold, by_var(big_rng), min(rvals), max(rvals),
+    min(leg_out$mean_dist_km), max(leg_out$mean_dist_km)))
 }
 fb <- fit_tab[fit_tab$source != "own fit", ]
 if (nrow(fb) > 0) {
+  fb_issues <- issues_tab[grepl("national model", issues_tab$issues), ]
+  n_zones   <- length(unique(fit_tab$scope[fit_tab$scope != "National"]))
   warn <- c(warn, sprintf(paste0(
-    "NATIONAL MODEL USED AT ZONE LEVEL: for %d of %d zone x variable fits the zone model could ",
-    "not be estimated (fewer than %d valid survey points, or degenerate fit) and the national ",
-    "model was used. Zones affected: %s. The national spatial structure is not confirmed by ",
-    "local data."),
-    nrow(fb), sum(fit_tab$scope != "National"), min_obs_district,
-    paste(unique(fb$scope), collapse = "; ")))
+    "NATIONAL MODEL USED AT ZONE LEVEL: the variogram is fitted per zone (%d zones x %d ",
+    "variables = %d fits); in %d of these fits the zone model could not be estimated (fewer ",
+    "than %d valid survey points, or degenerate fit) and the national model was used ",
+    "(zones: %s). Soil units concerned: %s. The national spatial structure is not confirmed ",
+    "by local data."),
+    n_zones, length(vars_cont_y), sum(fit_tab$scope != "National"), nrow(fb),
+    min_obs_district, paste(unique(fb$scope), collapse = "; "), by_var(fb_issues)))
 }
 cap <- fit_tab[fit_tab$range_capped, ]
 if (nrow(cap) > 0) {
