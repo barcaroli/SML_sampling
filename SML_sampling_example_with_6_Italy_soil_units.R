@@ -6,6 +6,9 @@
 # Authors : Claudia Cagnarini, Giulio Barcaroli
 # Adapted : 21/10/2026, from the national hybrid script (FAO/JRC raster
 #           values + kriging-based spatial structure, 15/09/2026)
+# Revised : 10/11/2026, the variogram fitting (kriging) was moved to the
+#           separate script Kriging_example_with_6_Italy_soil_units.R; this
+#           script reads its results from legend.csv
 # =============================================================================
 #
 # PURPOSE
@@ -21,27 +24,39 @@
 # soil units are the estimation domains; the auxiliary variables used to
 # build the strata are clay content (ARG) and elevation (DEM).
 #
+# SPATIAL COMPONENT (flag spatial_component, parameters block)
+# ------------------------------------------------------------
+#   TRUE  : for every soil unit the spatial parameters fitting (R2) and range
+#           (km) of PH and SOC are read from legend.csv, produced by
+#           Kriging_example_with_6_Italy_soil_units.R (or edited by hand).
+#           They are used in the initial solution (KmeansSolutionSpatial) and
+#           in the genetic algorithm (optimStrata); Phase 6b is performed.
+#   FALSE : no spatial component. The initial solution is computed with
+#           KmeansSolution2, optimStrata runs with fitting = 1 and range = 0
+#           in every domain; Phase 6b is not performed and legend.csv is not
+#           needed.
+# Before setting TRUE, read the report of the kriging script
+# (<base_nome>_kriging_report.txt): it says whether the spatial parameters
+# are reliable.
 #
 # INPUT (folder Input/)
 # ---------------------
-#   frame_SML_1km_6_soil_units.csv   1 km cells of the 6 soil units (frame)
-#   Test_6_soil_units_Italy.gpkg     legend: one polygon per soil unit, with
-#                                    its zone (field "zona")
+#   frame_SML_1km_6_soil_units.csv   1 km cells of the 6 soil units (frame,
+#                                    with fields zona and soil_unit)
 #   Soil_observed_points_2022_Italy.xlsx (sheet "Points")
 #                                    LUCAS points (X_WGS84, Y_WGS84, SOIL)
-#   SharewithMS20260825-IT.csv       point-level soil survey (pH_H2O, SOC)
-#                                    used only for the variogram fitting
-#   DEM_3035_1000m.tif               elevation raster, 1 km, EPSG:3035; used
-#                                    only for the DEM trend of the variogram
-#                                    fit (Phase 3). It is always read, but it
-#                                    affects the result only if
-#                                    use_spatial_fit = TRUE. The DEM used to
-#                                    build the strata comes from the frame.
+#   legend.csv                       only if spatial_component = TRUE: one row
+#                                    per soil unit with zona, soil_unit,
+#                                    fitting_PH, range_PH_km, fitting_SOC,
+#                                    range_SOC_km (output of the kriging
+#                                    script; other columns are ignored)
+# (Test_6_soil_units_Italy.gpkg, the soil-unit polygons, is not read here: it
+# is used by the kriging script and by the SML tool.)
 #
 # PROCESSING PHASES
 # -----------------------------------------------------------------------------
 #
-# Phase 1  - Set-up and domains. Parameters, frame and legend reading, construction of the
+# Phase 1  - Set-up and domains. Parameters, frame reading, construction of the
 #            grid (grid_df: coordinates x/y, cell id, dom_code = zona*soil_unit,
 #            LUCAS_GRID flag from ORIGINE), correlation matrix of PH, SOC, ARG
 #            and DEM (PDF).
@@ -51,55 +66,40 @@
 #            dropped. The retained ones (frame_cens) are forced into the
 #            sample as a census stratum, and their cells are removed from the
 #            frame that is actually sampled (grid_samp).
-# Phase 3  - Variogram fitting on the point survey. For PH and SOC a
-#            regression-kriging variogram (trend: x + y + DEM, spherical
-#            model) is fitted on the raw survey points: nationally, and
-#            separately for each zone (zone assigned to the survey points by
-#            spatial join with the legend; zones with fewer than
-#            min_obs_district valid points, or with a degenerate fit, fall
-#            back to the national model). Output: variogram PDF, tables
-#            fitting_by_nuts (R2) and range_by_nuts_km, one row per zone.
-#            NOTE: only a small part of the survey (about 110 of 1400 valid points for pH)
-#            lies inside the study area, and its empirical variograms are flat
-#            (Emilia) or based on too few points (Toscana), so the fits are
-#            not reliable at zone level.
-#            With use_spatial_fit = FALSE the tables are overridden with
-#            fitting = 1 and range = 0 in every zone (non-spatial); with TRUE
-#            (default here) they are used as fitted.
+# Phase 3  - Spatial parameters. If spatial_component = TRUE, fitting and
+#            range of each target variable are read from legend.csv for every
+#            soil unit and checked (one row per domain, fitting in (0, 1],
+#            range >= 0). If FALSE, fitting = 1 and range = 0 everywhere.
 # Phase 4  - SamplingStrata frame. Cells with non-finite values are dropped;
 #            the frame is built with buildFrameSpatial (X = ARG, DEM;
 #            Y = PH, SOC; variance = PH_VAR, SOC_VAR; domain = soil unit);
 #            domains with fewer than min_point_per_domain cells are dropped
 #            and domain values are re-indexed; each domain gets the
-#            fitting/range of its zone; precision constraints are set to
+#            fitting/range of its soil unit; precision constraints are set to
 #            CV = 5% on both PH and SOC in every domain.
-# Phase 5  - Initial solution by spatial K-means, domain by domain
-#            (KmeansSolutionSpatial, at most 5 clusters per domain), with a
-#            single-stratum fallback if it fails. It uses the zone fitting/
-#            range, so with use_spatial_fit = TRUE the starting number of
-#            strata can differ from the FALSE case.
-# Phase 6  - Genetic algorithm (optimStrata, method = "spatial") with
-#            fitting = 1 and range = 0 everywhere, i.e. the non-spatial
-#            baseline, starting from the K-means number of strata. The
-#            forced LUCAS points enter as a census stratum.
-# Phase 6b - Per-domain choice between non-spatial and spatial settings. If
-#            use_spatial_fit = TRUE, the strata of each domain are
-#            re-allocated with the zone's real fitting/range and the spatial
-#            version is kept only where it needs no more units; elsewhere the
-#            GA result is kept as is (not the recomputed one, to avoid
-#            solver noise). If use_spatial_fit = FALSE the GA result is kept
-#            in every domain and no comparison is made.
+# Phase 5  - Initial solution, domain by domain (at most 5 clusters per
+#            domain), with a single-stratum fallback if it fails:
+#            KmeansSolutionSpatial with the soil-unit fitting/range if
+#            spatial_component = TRUE, KmeansSolution2 if FALSE.
+# Phase 6  - Genetic algorithm (optimStrata, method = "spatial") starting
+#            from the K-means number of strata, with the soil-unit
+#            fitting/range (TRUE) or with fitting = 1 and range = 0 (FALSE).
+#            The forced LUCAS points enter as a census stratum.
+# Phase 6b - Only if spatial_component = TRUE: per-domain check of the
+#            spatial component. The strata of each domain found by the GA are
+#            re-allocated (Bethel) with fitting = 1 / range = 0 and with the
+#            soil-unit fitting/range; the GA (spatial) result is kept where
+#            the spatial version needs no more units, otherwise the
+#            non-spatial allocation of the same strata is used.
 # Phase 7  - Sample selection (selectSampleSpatial) and output assembly:
 #            sampled points, forced LUCAS points, summary table per domain.
 #
 # OUTPUT (folder Output/, prefix Example_with_6_soil_units)
 # -------------------------------------------------------
 #   _correlation_matrix.pdf   correlation matrix of PH, SOC, ARG, DEM
-#   _variograms.pdf           empirical variograms and fits (national, zones)
-#   _summary.txt              text report: variogram fits (national, zones),
-#                             non-spatial optimisation (Phase 6), spatial
-#                             comparison (Phase 6b), warnings (e.g. low
-#                             fitting), final sample
+#   _summary.txt              text report: spatial parameters used,
+#                             optimisation (Phase 6), spatial check (Phase
+#                             6b, if performed), warnings, final sample
 #   _units.csv                summary per domain: cells, sampled, LUCAS
 #   _allpoints.csv            all selected points (sampled + LUCAS)
 #   _sample.csv               SamplingStrata sample (with weights)
@@ -108,6 +108,8 @@
 #   .RData                    full workspace
 #   strata_SML.gpkg           strata as polygons (copy it to the Files/Strata/
 #                             folder of the SML tool to use it there)
+# The variogram plots, legend.csv and the kriging report are produced by
+# Kriging_example_with_6_Italy_soil_units.R, not by this script.
 #
 # =============================================================================
 
@@ -116,7 +118,7 @@
 # -----------------------------------------------------------------------------
 # CRAN packages ("parallel" is part of base R and needs no installation)
 cran_pkgs <- c("sp", "raster", "ggplot2", "dplyr", "tidyr", "clhs",
-               "sf", "terra", "readxl", "gstat", "doParallel", "pak")
+               "sf", "terra", "readxl", "doParallel", "pak")
 to_install <- cran_pkgs[!vapply(cran_pkgs, requireNamespace, logical(1), quietly = TRUE)]
 if (length(to_install) > 0) install.packages(to_install)
 
@@ -137,25 +139,24 @@ library(clhs)
 library(sf)
 library(terra)
 library(readxl)
-library(gstat)
 library(parallel)
 library(doParallel)
 
 
 # Modify the following paths:
-inp_path <- "D:\\Google Drive\\ISPRA\\SML_sampling_procedure_example\\Input\\"
-out_path <- "D:\\Google Drive\\ISPRA\\SML_sampling_procedure_example\\Output\\"
-kriging_survey_path <- "D:/Google Drive/ISPRA/SML_sampling_procedure_example\\Input\\SharewithMS20260825-IT.csv"
+inp_path <- "D:\\Google Drive\\ISPRA\\SML_sampling\\Input\\"
+out_path <- "D:\\Google Drive\\ISPRA\\SML_sampling\\Output\\"
+# Spatial parameters per soil unit, written by Kriging_example_with_6_Italy_soil_units.R
+# (same path as legend_csv_path there). Read only if spatial_component = TRUE.
+legend_csv_path <- paste0(inp_path, "legend.csv")
 
 
 frame <- read.csv(paste0(inp_path,"frame_SML_1km_6_soil_units.csv"))
 
-legend <- st_read(paste0(inp_path,"Test_6_soil_units_Italy.gpkg"))
-
 # Grid of 1 km cells (the sampling frame): one row per cell,
 # with the coordinates/cell id/domain/LUCAS-grid flag the rest of the script
-# expects. Domain = soil unit, as "zona*soil_unit": the first component (zona)
-# is the key into fitting_by_nuts / range_by_nuts_km further below.
+# expects. Domain = soil unit, as "zona*soil_unit": the same key is built
+# from the zona and soil_unit columns of legend.csv (Phase 3).
 grid_df <- frame
 grid_df$x          <- grid_df$X_LAEA
 grid_df$y          <- grid_df$Y_LAEA
@@ -167,23 +168,23 @@ grid_df$LUCAS_GRID <- as.integer(grid_df$ORIGINE == "LUCAS_2km")
 #----------------------------------------------------------------------------------------------------
 min_point_per_domain <- 5 # domains (soil units) with fewer cells than this are dropped
 
-# TRUE  = use the kriging-based fitting/range (Phase 3) in the K-means step and
-#         in the Phase 6b per-domain comparison. The GA itself always runs
-#         non-spatial (fitting = 1, range = 0). In each domain the spatial
-#         version is kept only if it needs no more units than the non-spatial
-#         one; otherwise the GA result is kept untouched. The fitting enters
-#         the spatial variance at the denominator, so a low fitting (e.g.
-#         ~0.4-0.5 of the national model) inflates the variance and the
-#         comparison is expected to select the non-spatial version.
-# FALSE = non-spatial everywhere (fitting = 1, range = 0), no comparison.
-#         Use it when the local variograms are not reliable (flat empirical
-#         variograms in Emilia; too few points in Toscana) and the DEM raster
-#         is then not needed for the result.
-use_spatial_fit <- TRUE
+# TRUE  = spatial component: fitting/range of each soil unit are read from
+#         legend.csv (output of Kriging_example_with_6_Italy_soil_units.R)
+#         and used in KmeansSolutionSpatial (Phase 5) and optimStrata
+#         (Phase 6); Phase 6b checks, per domain, that the spatial version
+#         needs no more units than the non-spatial one on the same strata.
+# FALSE = no spatial component: KmeansSolution2 (Phase 5), optimStrata with
+#         fitting = 1 and range = 0 (Phase 6), no Phase 6b, legend.csv not read.
+#         Use it when the kriging report classifies the spatial parameters as
+#         not reliable (in this example: fitting ~0.4-0.5 from the national
+#         model, ranges of 80-109 km against mean distances of 11-72 km
+#         inside the soil units).
+spatial_component <- FALSE
 
 # Fitting (R2) below this value triggers a warning in the summary report
-# (_summary.txt): the fitting enters the spatial variance at the denominator,
-# so a low fitting is expected to inflate the variance with the spatial component.
+# (_summary.txt) when spatial_component = TRUE: the fitting divides the
+# variance of the predicted values in the spatial variance, so a low fitting
+# inflates it.
 fitting_warn_threshold <- 0.9
 
 vars_cont_y <- c("PH", "SOC")
@@ -193,12 +194,6 @@ vars_cont_x <- c("ARG", "DEM")
 use_lucas_points <- TRUE # TRUE if some LUCAS points are imposed (forced into the sample)
 use_lucas_grid <- TRUE # TRUE if lucas grid is taken into account in the frame
 base_names <- if (use_lucas_grid) c("LUCAS_GRID", "zona", "soil_unit") else c("zona", "soil_unit")
-
-# Point-level soil survey data, used ONLY for the Phase 3 kriging-based
-# variogram fitting (spatial-autocorrelation source). vars_cont_y (frame
-# names) are mapped to the survey's own column names.
-
-kriging_source_col  <- c(PH = "pH_H2O", SOC = "SOC")   # vars_cont_y -> survey column
 
 base_nome <- "Example_with_6_soil_units"
 
@@ -318,198 +313,72 @@ if (use_lucas_points) {
 #---------------------------------------------------------------------------
 # Frame creation
 #---------------------------------------------------------------------------
-# Convert the grid to an sf spatial object (not used for variogram fitting:
-# see Phase 3 below, which fits on the survey point data).
+# Convert the grid to an sf spatial object
 dat <- st_as_sf(grid_df, coords = c("X_LAEA", "Y_LAEA"), crs = 3035, remove = FALSE)
 
 # ---------------------------------------------------------------------------
-# Phase 3 -- Regression-kriging variogram fitting on POINT survey data, per
-# zone.
+# Phase 3 -- Spatial parameters per soil unit
 #
-# The variogram is fitted on the RAW point-level soil survey observations
-# (SharewithMS20260825-IT.csv), not on the already-smoothed predicted values
-# of the frame, which would show artificially strong spatial autocorrelation.
+# spatial_component = TRUE: legend.csv (written by
+# Kriging_example_with_6_Italy_soil_units.R, or edited by hand) gives, for
+# each soil unit (zona, soil_unit), the columns fitting_<var> (R2, in (0, 1])
+# and range_<var>_km (range in km, >= 0) of every target variable in
+# vars_cont_y. Other columns (diagnostics of the kriging script) are ignored,
+# except "reliability", which is copied to the summary report if present.
+# A row with fitting = 1 and range = 0 makes that soil unit non-spatial.
+# The tables fitting_by_su / range_by_su_km (one row per dom_code
+# "zona*soil_unit", one column per target variable) are used in Phases 4-6b.
 #
-# For each target variable (PH, SOC) a trend v ~ x + y + DEM (regression
-# kriging / kriging with external drift) is removed and a spherical variogram
-# is fitted on the residuals, first nationally (all survey points) and then
-# separately for each zone of the legend ("Toscana meridionale", "Emilia
-# orientale - delta del Po"). The zone of each survey point comes from a
-# spatial join with the legend polygons. A zone with fewer than
-# min_obs_district valid observations, or whose fit is degenerate (R2 <= 0),
-# falls back to the national model. Only the variogram FIT
-# (fitting_by_nuts / range_by_nuts_km, one row per zone) is used here: no
-# kriging PREDICTION is performed, since Y and variance for the sampling
-# frame are already in the frame (see Phase 4 below).
-#
-# CAVEAT: only about 110 of the ~1400 valid pH survey points fall inside the 6 soil
-# units. In Emilia the empirical variograms are flat (no spatial structure
-# between 2 and 76 km; the spherical fit does not converge and is rejected),
-# in Toscana there are only 12 (PH) / 10 (SOC) valid points. Both zones
-# therefore fall back to the national model, which is not confirmed by local
-# data (national R2 ~0.41 for PH, ~0.49 for SOC, range ~109 / ~80 km). Since
-# the fitting enters the spatial variance at the denominator, such low values
-# are not expected to reduce the sample size: Phase 6b decides per domain,
-# and with use_spatial_fit = FALSE the tables are overridden below with
-# fitting = 1, range = 0 (non-spatial).
+# spatial_component = FALSE: legend.csv is not read; fitting = 1 and
+# range = 0 are used for every domain (Phase 4).
 # ---------------------------------------------------------------------------
-dem_rast <- rast(paste0(inp_path, "DEM_3035_1000m.tif"))
+if (spatial_component) {
+  if (!file.exists(legend_csv_path))
+    stop("spatial_component = TRUE but legend.csv was not found at: ", legend_csv_path,
+         "\nRun Kriging_example_with_6_Italy_soil_units.R first, or set spatial_component <- FALSE.")
+  legend_par <- read.csv(legend_csv_path, stringsAsFactors = FALSE, check.names = FALSE)
+  fit_cols <- paste0("fitting_", vars_cont_y)
+  rng_cols <- paste0("range_", vars_cont_y, "_km")
+  miss_cols <- setdiff(c("zona", "soil_unit", fit_cols, rng_cols), names(legend_par))
+  if (length(miss_cols) > 0)
+    stop("legend.csv: missing column(s): ", paste(miss_cols, collapse = ", "))
+  legend_par$dom_code <- paste(legend_par$zona, legend_par$soil_unit, sep = "*")
+  if (any(duplicated(legend_par$dom_code)))
+    stop("legend.csv: duplicated soil unit(s): ",
+         paste(unique(legend_par$dom_code[duplicated(legend_par$dom_code)]), collapse = ", "))
+  miss_dom <- setdiff(unique(grid_df$dom_code), legend_par$dom_code)
+  if (length(miss_dom) > 0)
+    stop("legend.csv: no row for the soil unit(s) of the frame: ", paste(miss_dom, collapse = ", "),
+         "\n(zona and soil_unit must match the frame exactly)")
+  fit_vals <- as.matrix(legend_par[, fit_cols])
+  rng_vals <- as.matrix(legend_par[, rng_cols])
+  # fitting = 0 is rejected by SamplingStrata (division by zero in the spatial
+  # variance); fitting > 1 or negative ranges have no meaning.
+  if (any(!is.finite(fit_vals)) || any(fit_vals <= 0 | fit_vals > 1))
+    stop("legend.csv: every fitting value must be in (0, 1]")
+  if (any(!is.finite(rng_vals)) || any(rng_vals < 0))
+    stop("legend.csv: every range value must be >= 0 (km)")
 
-# Per-variable trend covariate set: plain DEM for both (trend: x + y + DEM).
-trend_covars <- list(
-  PH = c("DEM"),
-  SOC = c("DEM")
-)
+  fitting_by_su <- as.data.frame(fit_vals, row.names = legend_par$dom_code)
+  colnames(fitting_by_su) <- vars_cont_y
+  range_by_su_km <- as.data.frame(rng_vals, row.names = legend_par$dom_code)
+  colnames(range_by_su_km) <- vars_cont_y
 
-soil_survey <- read.csv(kriging_survey_path)
-survey_pts  <- vect(soil_survey, geom = c("X_LAEA", "Y_LAEA"), crs = "EPSG:3035")
-survey_covs <- terra::extract(dem_rast, survey_pts, ID = FALSE)
-names(survey_covs) <- c("DEM")
-soil_survey <- cbind(soil_survey, survey_covs)
-dat_survey  <- st_as_sf(soil_survey, coords = c("X_LAEA", "Y_LAEA"), crs = st_crs(legend), remove = FALSE)
-# assign each survey point the "zona" of the legend polygon it falls in
-dat_survey  <- st_join(dat_survey, legend[, "zona"], left = TRUE)
-
-min_obs_district <- 30  # below this, a district falls back to the national model
-
-fit_variogram_model <- function(v_col, sub, covars) {
-  # Reduce() over per-column !is.na() masks, rather than complete.cases() on a
-  # matrix subset: `sub` is an sf object, and indexing it with `sub[, covars]`
-  # keeps the geometry list-column, which complete.cases() cannot handle.
-  ok <- !is.na(sub[[v_col]])
-  for (cc in covars) ok <- ok & !is.na(sub[[cc]])
-  sub <- sub[ok, ]
-  if (nrow(sub) < 15) return(NULL)
-  form  <- as.formula(paste(v_col, "~ X_LAEA + Y_LAEA +", paste(covars, collapse = " + ")))
-  emp_v <- tryCatch(variogram(form, data = sub), error = function(e) NULL)
-  if (is.null(emp_v) || nrow(emp_v) < 3) return(NULL)
-  m0 <- vgm(
-    psill  = var(sub[[v_col]], na.rm = TRUE) * 0.9,
-    model  = "Sph",
-    range  = 300000,
-    nugget = var(sub[[v_col]], na.rm = TRUE) * 0.1
-  )
-  fit <- tryCatch(fit.variogram(emp_v, model = m0), error = function(e) NULL)
-  if (is.null(fit)) return(NULL)
-
-  pred <- variogramLine(fit, dist_vector = emp_v$dist)
-  SSE  <- sum((emp_v$gamma - pred$gamma)^2)
-  SST  <- sum((emp_v$gamma - mean(emp_v$gamma))^2)
-  R2   <- 1 - SSE / SST
-  range_km <- fit$range[2] / 1000
-
-  # Reject a degenerate fit rather than returning it: a non-positive R2 means
-  # the spherical model fits the empirical semivariance no better than a flat
-  # line. The caller falls back to the national model when this returns NULL.
-  if (R2 <= 0) return(NULL)
-
-  # A fitted range far beyond the empirical variogram's own data support (>
-  # range_frac_max of its max lag) is an extrapolation artefact; cap it at
-  # the data support (the conservative "at least this far" reading).
-  range_frac_max <- 0.8
-  range_cap_km   <- range_frac_max * max(emp_v$dist) / 1000
-  if (range_km > range_cap_km) {
-    fit$range[2] <- range_cap_km * 1000
-    range_km <- range_cap_km
-  }
-
-  list(sub = sub, formula = form, emp_v = emp_v, fit = fit, R2 = R2,
-       range_km = range_km, n = nrow(sub))
-}
-
-pdf(file.path(out_path, paste0(base_nome, "_variograms.pdf")), width = 8, height = 5)
-national_vario <- list()
-district_vario <- list()
-zona_codes <- sort(unique(legend$zona[!is.na(legend$zona)]))
-fit_log <- list()   # one row per scope x variable, for the summary report
-
-for (v in names(kriging_source_col)) {
-  src_col <- kriging_source_col[[v]]
-  covars  <- trend_covars[[v]]
-
-  nat <- fit_variogram_model(src_col, dat_survey, covars)
-  if (is.null(nat)) {
-    stop(sprintf(paste(
-      "fit_variogram_model() rejected the NATIONAL fit for %s (survey column '%s'):",
-      "R2 <= 0 on the full national sample. There is no further fallback below",
-      "national scope -- inspect this variable's distribution/trend before retrying."
-    ), v, src_col))
-  }
-  national_vario[[v]] <- nat
-  fit_log[[length(fit_log) + 1]] <- data.frame(
-    scope = "National", variable = v, R2 = nat$R2, range_km = nat$range_km,
-    n_used = nat$n, n_zone_valid = NA_integer_, source = "own fit", stringsAsFactors = FALSE)
-  cat(sprintf("NATIONAL | %s (from '%s', covars: %s) -> R2 = %.3f, range = %.1f km, n = %d\n",
-              v, src_col, paste(covars, collapse=","), nat$R2, nat$range_km, nat$n))
-  print(plot(nat$emp_v, nat$fit,
-             main = sprintf("%s [kriging-based spatial fit, survey column '%s'] NATIONAL (fallback)\nrange=%.0f km, R2=%.3f",
-                             v, src_col, nat$range_km, nat$R2)))
-
-  district_vario[[v]] <- list()
-  for (nc in zona_codes) {
-    sub_nc  <- dat_survey[!is.na(dat_survey$zona) & dat_survey$zona == nc, ]
-    ok_nc   <- !is.na(sub_nc[[src_col]])
-    for (cc in covars) ok_nc <- ok_nc & !is.na(sub_nc[[cc]])
-    n_valid <- sum(ok_nc)
-    fit_d   <- if (n_valid >= min_obs_district) fit_variogram_model(src_col, sub_nc, covars) else NULL
-    zone_fallback <- is.null(fit_d)
-    if (is.null(fit_d)) {
-      reason <- if (n_valid < min_obs_district)
-        sprintf("n = %d < %d valid observations", n_valid, min_obs_district)
-      else
-        sprintf("n = %d but the district fit was degenerate (R2<=0)", n_valid)
-      message(sprintf("District %s: falling back to the national model for %s (%s)", nc, v, reason))
-      fit_d <- nat
-    } else {
-      cat(sprintf("DISTRICT %s | %s -> R2 = %.3f, range = %.1f km, n = %d\n",
-                  nc, v, fit_d$R2, fit_d$range_km, fit_d$n))
-      print(plot(fit_d$emp_v, fit_d$fit,
-                 main = sprintf("%s [kriging-based spatial fit, survey column '%s'] DISTRICT %s\nrange=%.0f km, R2=%.3f",
-                                 v, src_col, nc, fit_d$range_km, fit_d$R2)))
-    }
-    district_vario[[v]][[as.character(nc)]] <- fit_d
-    fit_log[[length(fit_log) + 1]] <- data.frame(
-      scope = as.character(nc), variable = v, R2 = fit_d$R2, range_km = fit_d$range_km,
-      n_used = fit_d$n, n_zone_valid = n_valid,
-      source = if (zone_fallback) "national model (fallback)" else "own fit",
-      stringsAsFactors = FALSE)
-  }
-}
-dev.off()
-
-# fitting/range lookup tables, one row per soil district (rownames = zona
-# code), one column per target variable (vars_cont_y names, i.e. PH /
-# SOC) -- used both by K-means initialisation (Phase 5) and by the GA
-# optimisation (fitting_by_domain / range_by_domain below).
-fitting_by_nuts <- as.data.frame(sapply(vars_cont_y, function(v)
-  sapply(district_vario[[v]][as.character(zona_codes)], `[[`, "R2")))
-rownames(fitting_by_nuts) <- as.character(zona_codes)
-
-range_by_nuts_km <- as.data.frame(sapply(vars_cont_y, function(v)
-  sapply(district_vario[[v]][as.character(zona_codes)], `[[`, "range_km")))
-rownames(range_by_nuts_km) <- as.character(zona_codes)
-
-# Guard: R2<=0 would make optimStrata compute zero/NaN within-stratum
-# variance, blowing up the GA fitness (Inf/NaN). Floor at a small value.
-if (any(fitting_by_nuts <= 0)) {
-  message("fitting_by_nuts has non-positive R2 values -- flooring at 0.01 to keep GA fitness finite.")
-  fitting_by_nuts[fitting_by_nuts <= 0] <- 0.01
-}
-
-cat("\nfitting_by_nuts (R2 per soil district, from point-survey kriging fit):\n");   print(fitting_by_nuts)
-cat("range_by_nuts_km (range per soil district, from point-survey kriging fit):\n"); print(range_by_nuts_km)
-
-if (!use_spatial_fit) {
-  message("use_spatial_fit = FALSE: overriding fitting/range with fitting = 1, range = 0 in every district.")
-  fitting_by_nuts[]   <- 1
-  range_by_nuts_km[]  <- 0
+  cat("\nSpatial parameters read from legend.csv (fitting = R2, range in km):\n")
+  print(cbind(fitting_by_su, setNames(range_by_su_km, paste0("range_", vars_cont_y, "_km"))))
+  if ("reliability" %in% names(legend_par) && any(legend_par$reliability != "ADEQUATE"))
+    message("WARNING: legend.csv classifies the spatial parameters of some soil units as ",
+            paste(unique(legend_par$reliability[legend_par$reliability != "ADEQUATE"]), collapse = " / "),
+            ": see the kriging report before relying on the spatial component.")
+} else {
+  message("spatial_component = FALSE: fitting = 1 and range = 0 in every domain; legend.csv not read.")
 }
 
 
 # ---------------------------------------------------------------------------
 # Phase 4 -- SamplingStrata frame construction. Y and variance come from the
 # frame itself (predicted PH/SOC and their variance); fitting/range come from
-# the per-zone tables built above.
+# legend.csv (Phase 3) if spatial_component = TRUE, else fitting = 1, range = 0.
 # ---------------------------------------------------------------------------
 df2 <- st_drop_geometry(dat)
 # Drop cells with missing/non-finite X, Y or variance: optimStrata(method =
@@ -559,7 +428,7 @@ frame <- buildFrameSpatial(df=df2,
 dom_code_to_num <- unique(data.frame(
   dom_code     = df2$dom_code,
   domainvalue  = frame$domainvalue,
-  dom_code_str = dom_code_orig,       # original string (bridge for range_by_domain lookup)
+  dom_code_str = dom_code_orig,       # original string (bridge for the legend.csv lookup)
   stringsAsFactors = FALSE
 ))
 
@@ -577,28 +446,31 @@ frame$domainvalue <- domain_map$new[match(frame$domainvalue, domain_map$old)]
 table(frame$domainvalue)
 
 # Assign each re-indexed domain the fitting (R2) and range of its OWN soil
-# district (from fitting_by_nuts / range_by_nuts_km, the kriging-based fit
-# on point survey data computed in Phase 3). The soil-district code is the
-# first component of dom_code_str (format zona*soil_unit).
-new_to_str  <- dom_code_to_num$dom_code_str[match(domain_map$old, dom_code_to_num$domainvalue)]
-new_to_nuts <- as.character(sapply(strsplit(new_to_str, "\\*"), `[`, 1))
+# unit: from legend.csv (Phase 3) if spatial_component = TRUE, otherwise
+# fitting = 1 and range = 0. The key is dom_code_str ("zona*soil_unit").
+# fitting_by_domain / range_by_domain_km: one row per re-indexed domain
+# (rownames "1", "2", ...), one column per target variable; the GA receives
+# the range in metres (range_by_domain_m), like the grid coordinates.
+new_to_str <- dom_code_to_num$dom_code_str[match(domain_map$old, dom_code_to_num$domainvalue)]
 
-get_domain_row <- function(nuts_key, tbl) {
-  if (nuts_key %in% rownames(tbl)) tbl[nuts_key, , drop = FALSE]
-  else as.data.frame(as.list(colMeans(tbl, na.rm = TRUE)))  # defensive fallback, should not trigger
+ny <- length(vars_cont_y)
+if (spatial_component) {
+  fitting_by_domain  <- fitting_by_su[new_to_str, , drop = FALSE]
+  range_by_domain_km <- range_by_su_km[new_to_str, , drop = FALSE]
+} else {
+  fitting_by_domain  <- as.data.frame(matrix(1, nrow = length(new_to_str), ncol = ny,
+                                             dimnames = list(NULL, vars_cont_y)))
+  range_by_domain_km <- as.data.frame(matrix(0, nrow = length(new_to_str), ncol = ny,
+                                             dimnames = list(NULL, vars_cont_y)))
 }
+rownames(fitting_by_domain)  <- as.character(seq_len(nrow(fitting_by_domain)))
+rownames(range_by_domain_km) <- as.character(seq_len(nrow(range_by_domain_km)))
+range_by_domain_m <- range_by_domain_km * 1000
 
-fitting_by_domain <- do.call(rbind, lapply(new_to_nuts, get_domain_row, tbl = fitting_by_nuts))
-rownames(fitting_by_domain) <- as.character(seq_len(nrow(fitting_by_domain)))
-
-range_by_domain <- do.call(rbind, lapply(new_to_nuts, get_domain_row, tbl = range_by_nuts_km))
-rownames(range_by_domain) <- as.character(seq_len(nrow(range_by_domain)))
-colnames(range_by_domain) <- paste0("range_", colnames(range_by_domain))
-
-cat("\nfitting_by_domain (per-district R2 from kriging fit, one row per re-indexed domain, head):\n")
-print(head(fitting_by_domain))
-cat("range_by_domain (per-district range km from kriging fit, one row per re-indexed domain, head):\n")
-print(head(range_by_domain))
+cat("\nfitting_by_domain (one row per re-indexed domain):\n")
+print(cbind(dom_code = new_to_str, fitting_by_domain))
+cat("range_by_domain_km (one row per re-indexed domain):\n")
+print(cbind(dom_code = new_to_str, range_by_domain_km))
 
 # Set up precision targets: 5% CV for both PH and SOC in every domain.
 # The cv data frame is the input constraints table required by optimStrata.
@@ -615,17 +487,20 @@ cv <- as.data.frame(c(
 cv
 
 # ---------------------------------------------------------------------------
-# K-means spatial clustering to provide strata initial solutions
-# Run KmeansSolutionSpatial domain by domain (lapply over domain IDs), using
-# each domain's own soil-district kriging-based fitting/range throughout (no
-# pre-GA spatial/non-spatial choice here -- the choice between spatial and
-# non-spatial settings is made per domain in Phase 6b, after the GA).
+# Phase 5 -- K-means clustering to provide strata initial solutions
+# Run domain by domain (lapply over domain IDs):
+#   spatial_component = TRUE : KmeansSolutionSpatial, with the domain's own
+#                              soil-unit fitting/range from legend.csv;
+#   spatial_component = FALSE: KmeansSolution2 (non-spatial; it clusters on
+#                              the Y values and evaluates each clustering
+#                              with the non-spatial Bethel allocation).
+# Only the resulting number of strata per domain is passed to the GA.
 # The maximum number of clusters per domain is capped at 5 and limited
 # to (number of distinct Y-value combinations - 1) to avoid empty strata.
-# A tryCatch wrapper (and an explicit row-count check, since
-# KmeansSolutionSpatial can return a degenerate 0-strata result without
-# raising an error) handles domains where clustering fails, assigning all
-# units to a single stratum as a fallback.
+# A tryCatch wrapper (and an explicit row-count check, since the K-means
+# functions can return a degenerate 0-strata result without raising an
+# error) handles domains where clustering fails, assigning all units to a
+# single stratum as a fallback.
 # ---------------------------------------------------------------------------
 
 # Determine the maximum feasible number of clusters per domain:
@@ -651,9 +526,7 @@ bind_fill <- function(lst) {
 # Sort frame by domain before splitting to ensure consistent subsetting
 frame <- frame[order(frame$domainvalue), ]
 
-# Run spatial K-means clustering independently for each domain.
-# Zone-specific R² (fitting) and range are passed so that domains within
-# the same zone share the same spatial autocorrelation parameters.
+# Run K-means clustering independently for each domain.
 kmean_list <- lapply(sort(unique(frame$domainvalue)), function(dv) {
   f_sub <- frame[frame$domainvalue == dv, ]
   f_sub$domainvalue <- 1L         # reset to 1 for the single-domain call
@@ -661,30 +534,45 @@ kmean_list <- lapply(sort(unique(frame$domainvalue)), function(dv) {
   cv_sub$domainvalue <- 1L
   k_max <- min(max_k[[as.character(dv)]], nrow(f_sub) - 1L)
   k_max <- max(k_max, 1L)
-  nuts_dv    <- new_to_nuts[dv]
-  fitting_dv <- unlist(get_domain_row(nuts_dv, fitting_by_nuts))
-  range_dv   <- unlist(get_domain_row(nuts_dv, range_by_nuts_km)) * 1000   # km -> metres for KmeansSolutionSpatial
-  res <- tryCatch(
-    KmeansSolutionSpatial(frame       = f_sub,
-                          fitting     = fitting_dv,
-                          range       = range_dv,
-                          kappa       = 1,
-                          errors      = cv_sub,
-                          nstrata     = NA,
-                          minnumstrat = 2,
-                          maxclusters = k_max,
-                          showPlot    = FALSE,
-                          # default maxsamp = 5000 subsamples larger domains, which
-                          # would trip the length check below and wrongly trigger
-                          # the single-stratum fallback
-                          maxsamp     = nrow(f_sub)),
-    error = function(e) NULL
-  )
-  # KmeansSolutionSpatial can return a degenerate result (0 strata / empty
+  if (spatial_component) {
+    fitting_dv <- as.numeric(fitting_by_domain[as.character(dv), ])
+    range_dv   <- as.numeric(range_by_domain_m[as.character(dv), ])   # metres, like the coordinates
+    res <- tryCatch(
+      KmeansSolutionSpatial(frame       = f_sub,
+                            fitting     = fitting_dv,
+                            range       = range_dv,
+                            kappa       = 1,
+                            errors      = cv_sub,
+                            nstrata     = NA,
+                            minnumstrat = 2,
+                            maxclusters = k_max,
+                            showPlot    = FALSE,
+                            # default maxsamp = 5000 subsamples larger domains, which
+                            # would trip the length check below and wrongly trigger
+                            # the single-stratum fallback
+                            maxsamp     = nrow(f_sub)),
+      error = function(e) NULL
+    )
+  } else {
+    # Non-spatial frame for KmeansSolution2: id, X, Y and domain only
+    # (variances and coordinates are not used by the non-spatial functions).
+    x_cols  <- grep("^X[0-9]+$", names(f_sub), value = TRUE)
+    f_sub_ns <- f_sub[, c("id", x_cols, y_cols, "domainvalue")]
+    res <- tryCatch(
+      KmeansSolution2(frame       = f_sub_ns,
+                      errors      = cv_sub,
+                      nstrata     = NA,
+                      minnumstrat = 2,
+                      maxclusters = k_max,
+                      showPlot    = FALSE),
+      error = function(e) NULL
+    )
+  }
+  # The K-means functions can return a degenerate result (0 strata / empty
   # suggestions) for some domains instead of raising an error -- validate
   # row count explicitly and fall back to a single stratum in that case too.
   if (is.null(res) || is.null(res$suggestions) || length(res$suggestions) != nrow(f_sub)) {
-    cat("  [bypass] dv =", dv, " nrow =", nrow(f_sub), " k_max =", k_max, " -- KmeansSolutionSpatial failed or degenerate\n")
+    cat("  [bypass] dv =", dv, " nrow =", nrow(f_sub), " k_max =", k_max, " -- K-means failed or degenerate\n")
     id_col <- if ("id" %in% names(f_sub)) f_sub$id else seq_len(nrow(f_sub))
     res <- data.frame(id          = as.character(id_col),
                        suggestions = factor(rep("1", nrow(f_sub))),
@@ -729,23 +617,16 @@ nstrat        <- pmax(nstrat, minnumstr_val)   # keep minimum of 2
 # census rows are appended in the package source).
 census_label <- if (use_lucas_points) max(nstrat) + 1L else NA_integer_
 # ---------------------------------------------------------------------------
-# Genetic algorithm (GA) optimisation of the stratification
+# Phase 6 -- Genetic algorithm (GA) optimisation of the stratification
 #
-# The GA runs with fitting = 1 and range = 0 EVERYWHERE (i.e. the non-spatial
-# baseline), not with the kriging-based fitting/range. Reasoning: a GA that
-# searches under fitting = 1 / range = 0 finds its own optimal non-spatial
-# stratification, which is expected to do better than taking a clustering
-# optimised for something else (spatial, or K-means only) and merely evaluating
-# fitting = 1 / range = 0 on it after the fact. The non-spatial baseline is
-# therefore built directly, and Phase 6b (below) only asks, per domain, whether
-# the real kriging-based fitting/range does even BETTER on top of that baseline.
+# spatial_component = TRUE : the GA runs with the soil-unit fitting/range read
+#                            from legend.csv (fitting_by_domain /
+#                            range_by_domain_m), i.e. it searches the optimal
+#                            stratification under the spatial variance.
+# spatial_component = FALSE: the GA runs with fitting = 1 and range = 0 in
+#                            every domain (non-spatial).
 # ---------------------------------------------------------------------------
 frame <- frame[order(frame$domainvalue),]
-
-fitting_nospatial <- as.data.frame(matrix(1, nrow = nrow(fitting_by_domain), ncol = ncol(fitting_by_domain)))
-rownames(fitting_nospatial) <- rownames(fitting_by_domain); colnames(fitting_nospatial) <- colnames(fitting_by_domain)
-range_nospatial <- as.data.frame(matrix(0, nrow = nrow(range_by_domain), ncol = ncol(range_by_domain)))
-rownames(range_nospatial) <- rownames(range_by_domain); colnames(range_nospatial) <- colnames(range_by_domain)
 
 set.seed(1234)
 args <- list(
@@ -755,8 +636,8 @@ args <- list(
   iter = 15,           # number of GA generations
   pops = 10,           # population size per generation
   nStrata = nstrat,    # initial number of strata (from K-means)
-  fitting = fitting_nospatial,  # fitting=1 everywhere -- see the note above
-  range = range_nospatial,      # range=0 everywhere -- see the note above
+  fitting = fitting_by_domain,   # legend.csv values, or 1 everywhere (Phase 4)
+  range = range_by_domain_m,     # legend.csv values in metres, or 0 everywhere (Phase 4)
   kappa = 1,
   writeFiles = FALSE,
   showPlot = FALSE,
@@ -771,166 +652,158 @@ solution <- do.call(optimStrata, args)
 #---------------------------------------------------------------------------
 framenew  <- solution$framenew
 outstrata <- solution$aggr_strata
+ga_label  <- if (spatial_component) "spatial, fitting/range from legend.csv" else "non-spatial, fitting=1/range=0 everywhere"
 
 # NOTE on the two totals below when use_lucas_points is TRUE: `outstrata`
 # includes the forced-census (LUCAS) rows at their full N (added by the
 # package AFTER its own internal "Sample size" print), so sum(outstrata$SOLUZ)
-# is NOT directly comparable to the optimized-only totals reported by Phase
-# 6b further below (which correctly exclude the census stratum -- see
-# census_label). The "optimized-only" total here reproduces exactly what
-# optimStrata itself printed during the GA run (dimens/"*** Sample size").
+# is NOT directly comparable to the optimized-only totals (which exclude the
+# census stratum -- see census_label). The "optimized-only" total here
+# reproduces exactly what optimStrata itself printed during the GA run
+# (dimens/"*** Sample size").
 optimized_only <- if (use_lucas_points) outstrata$STRATO != census_label else rep(TRUE, nrow(outstrata))
-cat(sprintf("\nGA result (non-spatial baseline, fitting=1/range=0 everywhere): total sample size = %.1f, %d strata (optimized-only, excludes forced census/LUCAS units)\n",
-            sum(outstrata$SOLUZ[optimized_only]), sum(optimized_only)))
+cat(sprintf("\nGA result (%s): total sample size = %.1f, %d strata (optimized-only, excludes forced census/LUCAS units)\n",
+            ga_label, sum(outstrata$SOLUZ[optimized_only]), sum(optimized_only)))
 if (use_lucas_points) {
   cat(sprintf("  (+ %.1f forced census/LUCAS units in %d additional take-all strata; total incl. census = %.1f, %d strata)\n",
               sum(outstrata$SOLUZ[!optimized_only]), sum(!optimized_only), sum(outstrata$SOLUZ), nrow(outstrata)))
 }
 
-# ---------------------------------------------------------------------------
-# Phase 6b -- POST-HOC per-domain selection: does real spatial correlation
-# improve on the non-spatial GA baseline?
-#
-# For each domain, its OWN final GA-refined stratification (framenew$STRATO,
-# already fixed at this point, optimised under fitting=1/range=0) is scored
-# under two settings -- fitting=1/range=0 (should reproduce the GA's own
-# result, a sanity check) and the real kriging-based fitting/range for that
-# domain -- via the exact same fitness formula the GA itself uses internally
-# (buildStrataDFSpatial + bethel_cpp, both non-exported/internal functions of
-# SamplingStrata, accessed via :::). Whichever setting gives the smaller
-# implied allocation on that SAME clustering is kept, replacing that
-# domain's rows in the aggregated strata table (outstrata) ONLY where the
-# real spatial fitting/range genuinely improves on the non-spatial GA
-# result; otherwise that domain's non-spatial GA result is left untouched.
-# Because both settings are compared on an identical, already GA-refined
-# clustering, this cannot do worse than the non-spatial GA baseline alone --
-# Only this post-hoc comparison, on the final GA-refined clustering, is used.
-# ---------------------------------------------------------------------------
-buildStrataDFSpatial <- SamplingStrata:::buildStrataDFSpatial
-bethel_cpp <- SamplingStrata:::bethel_cpp
-
-domain_recompute_strata <- function(dv, fit_vec, range_vec_m) {
-  sub <- framenew[framenew$DOMAINVALUE == dv, ]
-  # Exclude the forced-census (LUCAS) stratum, if any -- see the note above
-  # census_label: those units are never Bethel-optimized (SOLUZ is forced to
-  # their full N by the package itself) and are re-added to the final sample
-  # independently via the LABEL == max(framenew$LABEL) block further below,
-  # so they must not be fed to bethel_cpp() here.
-  if (use_lucas_points) sub <- sub[sub$STRATO != census_label, ]
-  strato_levels <- sort(unique(sub$STRATO))
-  sub$X1 <- match(sub$STRATO, strato_levels)  # re-index to 1..k for buildStrataDFSpatial
-  sub$DOMAINVALUE <- 1L
-  colnames(sub) <- toupper(colnames(sub))
-  strata <- buildStrataDFSpatial(dataset = sub[, c("ID","X1","LON","LAT","Y1","Y2","VAR1","VAR2","DOMAINVALUE")],
-                                  fitting = fit_vec, range = range_vec_m, kappa = 1,
-                                  progress = FALSE, verbose = FALSE)
-  strata$DOM1 <- 1L
-  cv_dv <- cv[cv$domainvalue == dv, , drop = FALSE]
-  cv_dv$domainvalue <- 1L
-  soluz <- tryCatch(bethel_cpp(strata, cv_dv, minnumstr = 2, realAllocation = TRUE),
-                     error = function(e) rep(NA_real_, nrow(strata)))
-  strata$SOLUZ  <- as.numeric(soluz)
-  strata$DOM1   <- dv                        # restore real domain id, for merging into outstrata
-  strata$STRATO <- strato_levels[strata$X1]  # map the 1..k index back to the GA's own STRATO labels
-  strata
-}
-
-# Keep the ORIGINAL (pre-Phase-6b) outstrata around so each domain's forced-
-# census row (SOLUZ already correctly = N, set by the package itself) can be
-# re-attached below. It is excluded from the bethel_cpp() comparison inside
-# domain_recompute_strata() (see census_label), but summaryStrata() further
-# down matches framenew's strata to outstrata BY POSITION per domain, so
-# outstrata_final must keep the same per-domain row count as framenew --
-# dropping the census row here would silently misalign that positional match.
+# Keep the ORIGINAL (GA) outstrata: it is the reference of the report and,
+# with spatial_component = TRUE, the starting point of Phase 6b.
 outstrata_raw <- outstrata
+census_n <- sum(outstrata_raw$SOLUZ[outstrata_raw$STRATO %in% census_label])
 
+# ---------------------------------------------------------------------------
+# Phase 6b -- (only if spatial_component = TRUE) POST-HOC per-domain check:
+# does the spatial component reduce the sample size on the GA strata?
+#
+# For each domain, its OWN final GA stratification (framenew$STRATO, already
+# fixed at this point, optimised under the spatial setting) is re-allocated
+# under two settings -- the soil-unit fitting/range from legend.csv (should
+# reproduce the GA's own result, a sanity check) and fitting = 1 / range = 0
+# (non-spatial) -- via the exact same fitness formula the GA itself uses
+# internally (buildStrataDFSpatial + bethel_cpp, both non-exported/internal
+# functions of SamplingStrata, accessed via :::). Both recomputed allocations
+# are compared on the SAME strata:
+#   - spatial needs no more units  -> the GA result of the domain is kept
+#                                     untouched (no solver noise from the
+#                                     standalone recompute enters the result);
+#   - non-spatial needs fewer units -> the domain's rows of outstrata are
+#                                     replaced by the non-spatial allocation of
+#                                     the same strata.
+# With spatial_component = FALSE this phase is skipped: the GA result is the
+# final allocation.
+# ---------------------------------------------------------------------------
 domain_choice <- character(0)
-outstrata_final <- outstrata[0, ]
-# Accumulates the fresh per-domain nospatial recompute (n_nospatial), summed
-# across all domains, regardless of which option Phase 6b actually picks.
-# This isolates the true spatial benefit from the small (solver-convergence)
-# noise between the GA's OWN internal nospatial Bethel allocation
-# (outstrata_raw) and this standalone bethel_cpp recompute of the exact same
-# fitting=1/range=0 configuration on the exact same clustering: the two
-# should coincide almost exactly, but small floating-point/convergence
-# differences between independent Bethel calls are expected. Comparing
-# nospatial_recomputed_total to outstrata_raw's regular-strata total shows
-# that noise; comparing it to outstrata_final's total shows the real,
-# noise-free benefit (if any) of using real spatial fitting/range in the
-# domains where Phase 6b picked it.
-nospatial_recomputed_total <- 0
 domain_log <- list()   # one row per domain, for the summary report
-for (dv in sort(unique(framenew$DOMAINVALUE))) {
-  cat("\nDomain: ",dv)
-  fit_real   <- as.numeric(fitting_by_domain[as.character(dv), ])
-  rng_real_m <- as.numeric(range_by_domain[as.character(dv), ]) * 1000
 
-  strata_spatial   <- if (use_spatial_fit) domain_recompute_strata(dv, fit_real, rng_real_m) else NULL
-  strata_nospatial <- domain_recompute_strata(dv, c(1, 1), c(0, 0))
+if (spatial_component) {
+  buildStrataDFSpatial <- SamplingStrata:::buildStrataDFSpatial
+  bethel_cpp <- SamplingStrata:::bethel_cpp
 
-  # n_spatial/n_nospatial compare only the regular (Bethel-optimized) strata --
-  # the census contribution, if any, is identical on both sides (same forced
-  # N regardless of fitting/range) so adding it here would not change which
-  # option is smaller; it is reattached below, to whichever option wins, so
-  # that outstrata_final's structure matches framenew.
-  n_spatial   <- if (use_spatial_fit) sum(strata_spatial$SOLUZ, na.rm = TRUE) else NA_real_
-  n_nospatial <- sum(strata_nospatial$SOLUZ, na.rm = TRUE)
-  use_spatial <- use_spatial_fit && is.finite(n_spatial) && (n_spatial <= n_nospatial || !is.finite(n_nospatial))
-  nospatial_recomputed_total <- nospatial_recomputed_total +
-    if (is.finite(n_nospatial)) n_nospatial else 0
-
-  # Whenever the spatial version does not win (use_spatial_fit = FALSE, or
-  # TRUE but no gain in this domain) keep the GA's own result untouched:
-  # strata_nospatial is used only for the comparison above, never as the
-  # result, so no solver-convergence noise from the standalone recompute
-  # enters the final allocation and TRUE/FALSE give identical output where
-  # the spatial version brings no gain.
-  winner <- if (use_spatial) strata_spatial
-            else outstrata_raw[outstrata_raw$DOM1 == dv & !(outstrata_raw$STRATO %in% census_label), ]
-  ga_reg <- outstrata_raw[outstrata_raw$DOM1 == dv & !(outstrata_raw$STRATO %in% census_label), ]
-  domain_log[[length(domain_log) + 1]] <- data.frame(
-    domain = dv, dom_code = new_to_str[dv],
-    fit_PH = fit_real[1], fit_SOC = fit_real[2],
-    range_PH_km = rng_real_m[1] / 1000, range_SOC_km = rng_real_m[2] / 1000,
-    n_strata_ga = nrow(ga_reg), n_ga = sum(ga_reg$SOLUZ, na.rm = TRUE),
-    n_nospatial = n_nospatial, n_spatial = n_spatial,
-    n_strata_final = nrow(winner), n_final = sum(winner$SOLUZ, na.rm = TRUE),
-    choice = if (use_spatial) "spatial" else "nospatial", stringsAsFactors = FALSE)
-  if (use_lucas_points) {
-    cens_row <- outstrata_raw[outstrata_raw$DOM1 == dv & outstrata_raw$STRATO == census_label, ]
-    if (nrow(cens_row) > 0) winner <- rbind(winner, cens_row[, names(winner)])
+  domain_recompute_strata <- function(dv, fit_vec, range_vec_m) {
+    sub <- framenew[framenew$DOMAINVALUE == dv, ]
+    # Exclude the forced-census (LUCAS) stratum, if any -- see the note above
+    # census_label: those units are never Bethel-optimized (SOLUZ is forced to
+    # their full N by the package itself) and are re-added to the final sample
+    # independently via the LABEL == max(framenew$LABEL) block further below,
+    # so they must not be fed to bethel_cpp() here.
+    if (use_lucas_points) sub <- sub[sub$STRATO != census_label, ]
+    strato_levels <- sort(unique(sub$STRATO))
+    sub$X1 <- match(sub$STRATO, strato_levels)  # re-index to 1..k for buildStrataDFSpatial
+    sub$DOMAINVALUE <- 1L
+    colnames(sub) <- toupper(colnames(sub))
+    strata <- buildStrataDFSpatial(dataset = sub[, c("ID", "X1", "LON", "LAT",
+                                                     paste0("Y", seq_len(ny)), paste0("VAR", seq_len(ny)),
+                                                     "DOMAINVALUE")],
+                                    fitting = fit_vec, range = range_vec_m, kappa = 1,
+                                    progress = FALSE, verbose = FALSE)
+    strata$DOM1 <- 1L
+    cv_dv <- cv[cv$domainvalue == dv, , drop = FALSE]
+    cv_dv$domainvalue <- 1L
+    soluz <- tryCatch(bethel_cpp(strata, cv_dv, minnumstr = 2, realAllocation = TRUE),
+                       error = function(e) rep(NA_real_, nrow(strata)))
+    strata$SOLUZ  <- as.numeric(soluz)
+    strata$DOM1   <- dv                        # restore real domain id, for merging into outstrata
+    strata$STRATO <- strato_levels[strata$X1]  # map the 1..k index back to the GA's own STRATO labels
+    strata
   }
-  outstrata_final <- rbind(outstrata_final, winner[, names(outstrata_final)])
-  domain_choice[as.character(dv)] <- if (use_spatial) "spatial" else "nospatial"
+
+  # Each domain's forced-census row (SOLUZ already correctly = N, set by the
+  # package itself) is re-attached below. It is excluded from the bethel_cpp()
+  # comparison inside domain_recompute_strata() (see census_label), but
+  # summaryStrata() further down matches framenew's strata to outstrata BY
+  # POSITION per domain, so outstrata_final must keep the same per-domain row
+  # count as framenew -- dropping the census row would silently misalign that
+  # positional match.
+  outstrata_final <- outstrata[0, ]
+  # spatial_recomputed_total accumulates the standalone spatial recompute of
+  # every domain: compared with the GA total it shows the solver-convergence
+  # noise between the GA's own internal Bethel allocation and an independent
+  # bethel_cpp call on the identical configuration (expected to be small).
+  spatial_recomputed_total   <- 0
+  nospatial_recomputed_total <- 0
+  for (dv in sort(unique(framenew$DOMAINVALUE))) {
+    cat("\nDomain: ", dv)
+    fit_real   <- as.numeric(fitting_by_domain[as.character(dv), ])
+    rng_real_m <- as.numeric(range_by_domain_m[as.character(dv), ])
+
+    strata_spatial   <- domain_recompute_strata(dv, fit_real, rng_real_m)
+    strata_nospatial <- domain_recompute_strata(dv, rep(1, ny), rep(0, ny))
+
+    # n_spatial/n_nospatial compare only the regular (Bethel-optimized) strata --
+    # the census contribution, if any, is identical on both sides (same forced
+    # N regardless of fitting/range); it is reattached below to the winner.
+    n_spatial   <- sum(strata_spatial$SOLUZ, na.rm = TRUE)
+    n_nospatial <- sum(strata_nospatial$SOLUZ, na.rm = TRUE)
+    use_spatial <- is.finite(n_spatial) && (n_spatial <= n_nospatial || !is.finite(n_nospatial))
+    spatial_recomputed_total   <- spatial_recomputed_total   + if (is.finite(n_spatial)) n_spatial else 0
+    nospatial_recomputed_total <- nospatial_recomputed_total + if (is.finite(n_nospatial)) n_nospatial else 0
+
+    ga_reg <- outstrata_raw[outstrata_raw$DOM1 == dv & !(outstrata_raw$STRATO %in% census_label), ]
+    winner <- if (use_spatial) ga_reg else strata_nospatial
+    domain_log[[length(domain_log) + 1]] <- data.frame(
+      domain = dv, dom_code = new_to_str[dv],
+      setNames(as.list(fit_real), paste0("fit_", vars_cont_y)),
+      setNames(as.list(rng_real_m / 1000), paste0("range_", vars_cont_y, "_km")),
+      n_strata_ga = nrow(ga_reg), n_ga = sum(ga_reg$SOLUZ, na.rm = TRUE),
+      n_nospatial = n_nospatial, n_spatial = n_spatial,
+      n_strata_final = nrow(winner), n_final = sum(winner$SOLUZ, na.rm = TRUE),
+      choice = if (use_spatial) "spatial" else "nospatial", stringsAsFactors = FALSE)
+    if (use_lucas_points) {
+      cens_row <- outstrata_raw[outstrata_raw$DOM1 == dv & outstrata_raw$STRATO == census_label, ]
+      if (nrow(cens_row) > 0) winner <- rbind(winner[, names(outstrata_final)], cens_row[, names(outstrata_final)])
+    }
+    outstrata_final <- rbind(outstrata_final, winner[, names(outstrata_final)])
+    domain_choice[as.character(dv)] <- if (use_spatial) "spatial" else "nospatial"
+  }
+
+  cat("\n=== Phase 6b: does the spatial component reduce the sample size on the GA strata, per domain? ===\n")
+  print(table(domain_choice))
+  # All totals below include the forced-census/LUCAS units on an equal footing.
+  cat(sprintf("Total sample size, GA result (spatial):                              %.1f\n", sum(outstrata_raw$SOLUZ)))
+  cat(sprintf("Total sample size, spatial recomputed on the same strata:            %.1f   (difference = solver noise)\n",
+              spatial_recomputed_total + census_n))
+  cat(sprintf("Total sample size, non-spatial (fitting=1/range=0) on the same strata: %.1f\n",
+              nospatial_recomputed_total + census_n))
+  cat(sprintf("Total sample size, after Phase 6b:                                   %.1f\n", sum(outstrata_final$SOLUZ)))
+
+  # From here on, `outstrata` is the Phase-6b table: every domain uses
+  # whichever setting gave it the smaller allocation on its own GA strata.
+  # All downstream code (summaryStrata, sampling, outputs) simply uses it.
+  outstrata <- outstrata_final
+} else {
+  # No Phase 6b: the GA (non-spatial) result is the final allocation.
+  for (dv in sort(unique(framenew$DOMAINVALUE))) {
+    ga_reg <- outstrata_raw[outstrata_raw$DOM1 == dv & !(outstrata_raw$STRATO %in% census_label), ]
+    domain_log[[length(domain_log) + 1]] <- data.frame(
+      domain = dv, dom_code = new_to_str[dv],
+      n_strata_ga = nrow(ga_reg), n_ga = sum(ga_reg$SOLUZ, na.rm = TRUE),
+      stringsAsFactors = FALSE)
+  }
+  outstrata_final <- outstrata_raw
 }
-
-cat("\n=== Phase 6b: does real spatial fitting/range improve on the non-spatial GA baseline, per domain? ===\n")
-print(table(domain_choice))
-# Both totals below include the forced-census/LUCAS units on an equal footing
-# (outstrata_final carries the same untouched census rows as outstrata_raw --
-# see the reattachment above), so this comparison is now apples-to-apples;
-# any difference between the two totals comes only from the regular strata.
-cat(sprintf("Total sample size, GA result (non-spatial baseline, fitting=1/range=0 everywhere): %.1f\n", sum(outstrata_raw$SOLUZ)))
-cat(sprintf("Total sample size, after Phase 6b (real spatial kept only where it improves):       %.1f\n", sum(outstrata_final$SOLUZ)))
-# Diagnostic: separates solver-convergence noise (between the GA's own
-# internal nospatial Bethel allocation and this standalone recompute of the
-# identical config) from the real, noise-free benefit of using real spatial
-# fitting/range where Phase 6b picked it.
-census_total <- if (use_lucas_points) sum(outstrata_raw$SOLUZ[outstrata_raw$STRATO == census_label]) else 0
-cat(sprintf("Total sample size, fresh recompute of nospatial EVERYWHERE (same clustering, all domains): %.1f\n",
-            nospatial_recomputed_total + census_total))
-cat(sprintf("  -> vs GA result above: %.1f = solver-convergence noise between the two independent Bethel calls (expect small, not a real effect)\n",
-            (nospatial_recomputed_total + census_total) - sum(outstrata_raw$SOLUZ)))
-cat(sprintf("  -> vs Phase 6b result above: %.1f = real, noise-free benefit of using spatial fitting/range in the %d domain(s) where Phase 6b picked it\n",
-            (nospatial_recomputed_total + census_total) - sum(outstrata_final$SOLUZ),
-            sum(domain_choice == "spatial")))
-
-# From here on, `outstrata` is the Phase-6b-corrected table: every domain
-# uses whichever setting gave it the smaller allocation on its own final
-# clustering. All downstream code (summaryStrata, sampling, outputs) is
-# unchanged and simply uses this corrected
-# `outstrata`.
-outstrata <- outstrata_final
 
 strataStructure <- summaryStrata(framenew, outstrata, progress = FALSE)
 sum(strataStructure$Allocation)
@@ -1021,7 +894,6 @@ tab3 <- tab2 %>%
 #--------------------------------------------------------------
 # Summary report (text file, English): main results of the run
 #--------------------------------------------------------------
-fit_tab <- do.call(rbind, fit_log)
 dom_tab <- do.call(rbind, domain_log)
 dom_tab$zone      <- sub("\\*.*", "", dom_tab$dom_code)
 dom_tab$soil_unit <- sub("^[^*]*\\*", "", dom_tab$dom_code)
@@ -1042,89 +914,100 @@ add("Domains             : ", nrow(dom_tab), " soil units in ", length(unique(do
 add("Target variables    : ", paste(vars_cont_y, collapse = ", "), " (CV target = 5% in every domain)")
 add("Stratification vars : ", paste(vars_cont_x, collapse = ", "))
 add("Forced LUCAS points : ", if (use_lucas_points) sum(points_all$source == "lucas") else 0)
-add("use_spatial_fit     : ", use_spatial_fit)
+add("spatial_component   : ", spatial_component)
 
-hdr("1. VARIOGRAM FITTING (point-level soil survey, regression kriging, spherical model)")
-add("R2 = goodness of fit of the spherical variogram (this is the 'fitting' used in the")
-add("spatial variance); range = variogram range in km; trend = x + y + DEM.")
-add("A zone with fewer than ", min_obs_district, " valid survey points, or with a degenerate fit,")
-add("uses the national model.\n")
-fit_out <- fit_tab
-fit_out$R2       <- round(fit_out$R2, 3)
-fit_out$range_km <- round(fit_out$range_km, 1)
-names(fit_out) <- c("scope", "variable", "R2 (fitting)", "range (km)", "n of model", "n valid in zone", "source")
-addt(fit_out)
+hdr("1. SPATIAL PARAMETERS (Phase 3)")
+if (spatial_component) {
+  add("Read from ", legend_csv_path, " (produced by Kriging_example_with_6_Italy_soil_units.R:")
+  add("see its report for the fit and the reliability of these values). fitting = R2;")
+  add("range in km. Used in KmeansSolutionSpatial (Phase 5) and optimStrata (Phase 6).\n")
+  par_out <- data.frame(domain = seq_along(new_to_str), zone = sub("\\*.*", "", new_to_str),
+                        soil_unit = sub("^[^*]*\\*", "", new_to_str),
+                        round(setNames(fitting_by_domain, paste0("fit_", vars_cont_y)), 3),
+                        round(setNames(range_by_domain_km, paste0("range_", vars_cont_y, "_km")), 1),
+                        check.names = FALSE)
+  if ("reliability" %in% names(legend_par))
+    par_out$reliability <- legend_par$reliability[match(new_to_str, legend_par$dom_code)]
+  addt(par_out)
+} else {
+  add("Not used: fitting = 1 and range = 0 in every domain (non-spatial). Initial solution by")
+  add("KmeansSolution2 (Phase 5); legend.csv not read.")
+}
 
-hdr("2. OPTIMISATION WITHOUT SPATIAL COMPONENT (Phase 6: GA, fitting = 1, range = 0)")
+hdr(paste0("2. OPTIMISATION (Phase 6: GA, ", ga_label, ")"))
 add("Sample size per domain (optimised strata only; forced LUCAS census units excluded):\n")
 ga_out <- dom_tab[, c("domain", "zone", "soil_unit", "n_strata_ga", "n_ga")]
 ga_out$n_ga <- round(ga_out$n_ga, 1)
 names(ga_out) <- c("domain", "zone", "soil unit", "strata", "sample size")
 addt(ga_out)
-census_n <- sum(outstrata_raw$SOLUZ[outstrata_raw$STRATO %in% census_label])
 add("\nOptimised strata total : ", round(sum(dom_tab$n_ga), 1), " units in ", sum(dom_tab$n_strata_ga), " strata")
 add("Forced LUCAS (census) : ", round(census_n, 1), " units")
 add("TOTAL (GA result)     : ", round(sum(outstrata_raw$SOLUZ), 1), " units")
 
-hdr("3. OPTIMISATION WITH SPATIAL COMPONENT (Phase 6b)")
-if (!use_spatial_fit) {
-  add("Not performed (use_spatial_fit = FALSE): the GA result above is the final allocation.")
+hdr("3. CHECK OF THE SPATIAL COMPONENT (Phase 6b)")
+if (!spatial_component) {
+  add("Not performed (spatial_component = FALSE): the GA result above is the final allocation.")
 } else {
-  add("For each domain the strata found by the GA are re-allocated (Bethel) with the zone's")
-  add("fitting and range; the spatial version is kept only if it needs no more units than the")
-  add("non-spatial one recomputed on the same strata.\n")
-  sp_out <- dom_tab[, c("domain", "zone", "soil_unit", "fit_PH", "fit_SOC",
-                        "range_PH_km", "range_SOC_km", "n_nospatial", "n_spatial", "choice")]
+  add("For each domain the strata found by the GA are re-allocated (Bethel) with the soil-unit")
+  add("fitting and range and with fitting = 1 / range = 0; the GA (spatial) result is kept where")
+  add("the spatial version needs no more units, otherwise the non-spatial allocation of the same")
+  add("strata is used.\n")
+  sp_cols <- c("domain", "zone", "soil_unit", "n_nospatial", "n_spatial", "choice")
+  sp_out <- dom_tab[, sp_cols]
   sp_out$difference <- round(sp_out$n_spatial - sp_out$n_nospatial, 1)
-  sp_out[, c("fit_PH", "fit_SOC")] <- round(sp_out[, c("fit_PH", "fit_SOC")], 3)
-  sp_out[, c("range_PH_km", "range_SOC_km")] <- round(sp_out[, c("range_PH_km", "range_SOC_km")], 1)
   sp_out[, c("n_nospatial", "n_spatial")] <- round(sp_out[, c("n_nospatial", "n_spatial")], 1)
-  names(sp_out) <- c("domain", "zone", "soil unit", "fit PH", "fit SOC", "range PH km",
-                     "range SOC km", "n non-spatial", "n spatial", "choice", "n spatial - n non-sp.")
+  names(sp_out) <- c("domain", "zone", "soil unit", "n non-spatial", "n spatial", "choice", "n spatial - n non-sp.")
   addt(sp_out)
   n_ns_all <- nospatial_recomputed_total + census_n
+  n_sp_all <- spatial_recomputed_total + census_n
   add("\nDomains where the spatial version was kept : ", sum(dom_tab$choice == "spatial"), " of ", nrow(dom_tab))
-  add("TOTAL, GA result (non-spatial)              : ", round(sum(outstrata_raw$SOLUZ), 1))
-  add("TOTAL, non-spatial recomputed (same strata) : ", round(n_ns_all, 1),
-      "   (difference from GA = ", round(n_ns_all - sum(outstrata_raw$SOLUZ), 1),
+  add("TOTAL, GA result (spatial)                  : ", round(sum(outstrata_raw$SOLUZ), 1))
+  add("TOTAL, spatial recomputed (same strata)     : ", round(n_sp_all, 1),
+      "   (difference from GA = ", round(n_sp_all - sum(outstrata_raw$SOLUZ), 1),
       ": solver noise between independent Bethel calls)")
+  add("TOTAL, non-spatial on the same strata       : ", round(n_ns_all, 1))
   add("TOTAL, final allocation after Phase 6b      : ", round(sum(outstrata_final$SOLUZ), 1))
-  add("Gain of the spatial component               : ", round(n_ns_all - sum(outstrata_final$SOLUZ), 1),
-      " units (", round(100 * (n_ns_all - sum(outstrata_final$SOLUZ)) / n_ns_all, 1), "% of the non-spatial total)")
+  add("Reduction due to the spatial component      : ", round(n_ns_all - sum(outstrata_final$SOLUZ), 1),
+      " units (", round(100 * (n_ns_all - sum(outstrata_final$SOLUZ)) / n_ns_all, 1),
+      "% of the non-spatial total on the same strata)")
 }
 
 hdr("4. WARNINGS")
 warn <- character(0)
-low_zone <- fit_tab[fit_tab$scope != "National" & fit_tab$R2 < fitting_warn_threshold, ]
-if (nrow(low_zone) > 0) {
-  warn <- c(warn, sprintf(paste0(
-    "LOW FITTING: the variogram fitting (R2) is below %.2f in %d of %d zone x variable fits ",
-    "(range %.2f-%.2f). The fitting enters the spatial variance at the denominator, so with a ",
-    "low fitting the spatial component is expected to INCREASE the variance, i.e. to give a ",
-    "sample size not smaller than the non-spatial one. Treat any spatial gain with caution."),
-    fitting_warn_threshold, nrow(low_zone), sum(fit_tab$scope != "National"),
-    min(low_zone$R2), max(low_zone$R2)))
-  if (use_spatial_fit && any(dom_tab$choice == "spatial")) {
+if (spatial_component) {
+  fit_mat  <- as.matrix(fitting_by_domain)
+  low_dom  <- which(apply(fit_mat < fitting_warn_threshold, 1, any))
+  if (length(low_dom) > 0) {
     warn <- c(warn, sprintf(paste0(
-      "SPATIAL VERSION SELECTED DESPITE LOW FITTING: in %d of %d domains Phase 6b kept the ",
-      "spatial allocation (gain %.1f units). This is not the expected behaviour for fitting < %.2f; ",
-      "check how fitting and range enter the spatial variance (the gain may come from the large ",
-      "range, ~%.0f-%.0f km on 1 km cells, rather than from the fitting) before relying on it."),
-      sum(dom_tab$choice == "spatial"), nrow(dom_tab),
-      (nospatial_recomputed_total + census_n) - sum(outstrata_final$SOLUZ), fitting_warn_threshold,
-      min(fit_tab$range_km), max(fit_tab$range_km)))
+      "LOW FITTING: the fitting (R2) read from legend.csv is below %.2f in %d of %d domains ",
+      "(values %.2f-%.2f). The fitting divides the variance of the predicted values in the ",
+      "spatial variance, so a low fitting inflates it. Treat any spatial gain with caution."),
+      fitting_warn_threshold, length(low_dom), nrow(fit_mat),
+      min(fit_mat[low_dom, ]), max(fit_mat[low_dom, ])))
+    if (any(dom_tab$choice == "spatial")) {
+      warn <- c(warn, sprintf(paste0(
+        "SPATIAL VERSION KEPT DESPITE LOW FITTING: in %d of %d domains Phase 6b kept the spatial ",
+        "allocation (reduction %.1f units). With a range of %.0f-%.0f km on 1 km cells the ",
+        "prediction errors of the cells of a stratum are treated as strongly correlated and the ",
+        "prediction-variance term of the stratum variance nearly cancels: the reduction comes from ",
+        "the range, not from the fitting. Rely on it only if the range is supported by local data ",
+        "(see the kriging report)."),
+        sum(dom_tab$choice == "spatial"), nrow(dom_tab),
+        (nospatial_recomputed_total + census_n) - sum(outstrata_final$SOLUZ),
+        min(range_by_domain_km), max(range_by_domain_km)))
+    }
   }
-  if (!use_spatial_fit) {
-    warn <- c(warn, "The spatial component was NOT used (use_spatial_fit = FALSE), consistent with the low fitting.")
+  if ("reliability" %in% names(legend_par)) {
+    rel_dom <- legend_par$reliability[match(new_to_str, legend_par$dom_code)]
+    bad <- rel_dom != "ADEQUATE"
+    if (any(bad)) {
+      warn <- c(warn, sprintf(paste0(
+        "SPATIAL PARAMETERS NOT VALIDATED: legend.csv classifies %d of %d domains as %s (%s). ",
+        "The kriging report recommends spatial_component = FALSE when any soil unit is NOT RELIABLE."),
+        sum(bad), length(bad), paste(unique(rel_dom[bad]), collapse = " / "),
+        paste(sub("^[^*]*\\*", "", new_to_str[bad]), collapse = ", ")))
+    }
   }
-}
-fb <- fit_tab[fit_tab$source != "own fit", ]
-if (nrow(fb) > 0) {
-  warn <- c(warn, sprintf(paste0(
-    "NATIONAL MODEL USED AT ZONE LEVEL: for %d of %d zone x variable fits the zone model could not be ",
-    "estimated (fewer than %d valid survey points, or degenerate fit) and the national model was used. ",
-    "Zones affected: %s. The national spatial structure is not confirmed by local data."),
-    nrow(fb), sum(fit_tab$scope != "National"), min_obs_district, paste(unique(fb$scope), collapse = "; ")))
 }
 if (length(warn) == 0) add("No warnings.") else for (w in warn) add("* ", w, "\n")
 
@@ -1139,10 +1022,12 @@ add("\nSites per domain (domains with at least ", min_point_per_domain, " cells 
 addt(as.data.frame(tab3))
 
 hdr("6. OTHER NOTES")
-add("* Survey points inside the study area are few (see Phase 3): the zone variograms are not reliable.")
-add("* The DEM raster is used only for the trend of the variogram fit; the DEM used to build the strata comes from the frame.")
+if (spatial_component) {
+  add("* The spatial parameters come from legend.csv; the variogram fits, their reliability and the")
+  add("  variogram plots are in the outputs of Kriging_example_with_6_Italy_soil_units.R.")
+}
 add("* The CV of the target variables is computed on the model-predicted values and variances of the frame.")
-add("\nOutput files: ", base_nome, "_units.csv, _allpoints.csv, _sample.csv, _figures.pdf, _variograms.pdf, .gpkg, .RData")
+add("\nOutput files: ", base_nome, "_units.csv, _allpoints.csv, _sample.csv, _figures.pdf, _correlation_matrix.pdf, .gpkg, .RData, strata_SML.gpkg")
 writeLines(rep_lines, paste0(out_path, base_nome, "_summary.txt"))
 
 write.csv(tab3, paste0(out_path, paste0(base_nome, "_units.csv")), row.names=FALSE)
