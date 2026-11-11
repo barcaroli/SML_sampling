@@ -1,7 +1,0 @@
-"dom_code","zona","soil_unit","n_cell","dom_val","n_tot","n_lucas_grid","n_lucas_forced"
-"Emilia orientale - delta del Po*BA_Cropland","Emilia orientale - delta del Po","BA_Cropland",697,TRUE,202,57,5
-"Emilia orientale - delta del Po*BE_Cropland","Emilia orientale - delta del Po","BE_Cropland",6616,TRUE,250,67,30
-"Emilia orientale - delta del Po*DO_Cropland","Emilia orientale - delta del Po","DO_Cropland",366,TRUE,144,31,2
-"Toscana meridionale*60.4_Cropland","Toscana meridionale","60.4_Cropland",682,TRUE,181,39,7
-"Toscana meridionale*60.4_Forest","Toscana meridionale","60.4_Forest",1259,TRUE,276,56,8
-"Toscana meridionale*60.7_Cropland","Toscana meridionale","60.7_Cropland",935,TRUE,296,79,5

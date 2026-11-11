@@ -1,7 +1,0 @@
-"zona","soil_unit","fitting_PH","range_PH_km","source_PH","n_PH","range_capped_PH","fitting_SOC","range_SOC_km","source_SOC","n_SOC","range_capped_SOC","mean_dist_km","rho_PH","reliability_PH","rho_SOC","reliability_SOC","reliability"
-"Emilia orientale - delta del Po","BA_Cropland",0.4088,109.39,"national fallback",1414,FALSE,0.4922,80.3,"national fallback",824,FALSE,17.8,0.85,"NOT RELIABLE",0.801,"NOT RELIABLE","NOT RELIABLE"
-"Emilia orientale - delta del Po","BE_Cropland",0.4088,109.39,"national fallback",1414,FALSE,0.4922,80.3,"national fallback",824,FALSE,71.7,0.519,"NOT RELIABLE",0.409,"NOT RELIABLE","NOT RELIABLE"
-"Emilia orientale - delta del Po","DO_Cropland",0.4088,109.39,"national fallback",1414,FALSE,0.4922,80.3,"national fallback",824,FALSE,10.6,0.908,"NOT RELIABLE",0.876,"NOT RELIABLE","NOT RELIABLE"
-"Toscana meridionale","60.4_Cropland",0.4088,109.39,"national fallback",1414,FALSE,0.4922,80.3,"national fallback",824,FALSE,20.2,0.831,"NOT RELIABLE",0.778,"NOT RELIABLE","NOT RELIABLE"
-"Toscana meridionale","60.4_Forest",0.4088,109.39,"national fallback",1414,FALSE,0.4922,80.3,"national fallback",824,FALSE,25.3,0.794,"NOT RELIABLE",0.73,"NOT RELIABLE","NOT RELIABLE"
-"Toscana meridionale","60.7_Cropland",0.4088,109.39,"national fallback",1414,FALSE,0.4922,80.3,"national fallback",824,FALSE,27.5,0.778,"NOT RELIABLE",0.71,"NOT RELIABLE","NOT RELIABLE"

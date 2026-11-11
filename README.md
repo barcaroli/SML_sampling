@@ -1,94 +1,131 @@
-# SML_sampling — Sampling design for a Soil Monitoring Level (SML) network
+# SML optimal sampling tool — Sampling design for soil monitoring under the Soil Monitoring Law
 
 This repository contains an R workflow that selects the **sampling sites of a soil monitoring network**
-(Soil Monitoring Level, SML) in Italy. It is developed at ISPRA by Claudia Cagnarini and Giulio Barcaroli.
+according to the Soil Monitoring Law (SML). It is developed at ISPRA by Claudia Cagnarini and Giulio Barcaroli.
 
-The included scripts are a **worked example on a small test area**: 6 domains (soil unit × land use) in
-2 zones (southern Tuscany; eastern Emilia / Po delta), on a 1 km grid. They are the scaled-down version of a
-national script that combines FAO/JRC raster values with a kriging-based description of spatial structure.
+The included data are a **worked example on a small test area in Italy**: 6 soil units (soil unit × land use,
+e.g. `BA_Cropland`, `60.4_Forest`) on a 1 km grid. The soil units are the estimation domains.
 
-The workflow is split into two independent scripts:
+## What the script does
 
-| Script | Role | When to run it |
-|---|---|---|
-| `SML_sampling_example_with_6_Italy_soil_units.R` | Sampling design: frame, LUCAS points, optimal stratification and allocation, sample selection, outputs | Always |
-| `Kriging_example_with_6_Italy_soil_units.R` | Spatial parameters: variogram fitting on point survey data, `legend.csv` with fitting and range per soil unit, reliability report | Only to (re)estimate the spatial parameters, before a run with `spatial_component = TRUE` |
+The script `SML_optimal_sampling_tool.R` runs in six phases:
 
-## What the sampling script does
+1. **Set-up and domains**: reads the parameters and the sampling frame (1 km cells with the DSM predictions of
+   the target variables, their prediction variance and the auxiliary variables). Cells of the LUCAS 2 km grid
+   (`POINT_ID > 0`) are flagged.
+2. **Spatial parameters**, according to the flag `spatial_component`:
+   - `TRUE`: reads `fitting` (R²) and `range` (km) of every target variable for every soil unit from the legend;
+   - `FALSE`: no spatial component, `fitting = 1` and `range = 0` in every domain; the legend is not read.
+3. **SamplingStrata frame**: cells with non-finite values are dropped, soil units with fewer than
+   `min_point_per_domain` cells are dropped, precision constraints are set to `cv_target` in every domain.
+4. **Initial solution** per domain with K-means (`KmeansSolutionSpatial` if `TRUE`, `KmeansSolution2` if
+   `FALSE`).
+5. **Optimal stratification and allocation** with [SamplingStrata](https://barcaroli.github.io/SamplingStrata/):
+   genetic algorithm (`optimStrata`) with Bethel allocation, so that the coefficient of variation (CV) of every
+   target variable is at most `cv_target` in every domain. Only if `spatial_component = TRUE`:
+   - **Phase 5b**: the strata found by the GA are re-allocated with and without the spatial component; the
+     non-spatial allocation is used where it needs fewer units;
+   - **Phase 5c**: a second, non-spatial GA is run (`fitting = 1`, `range = 0`); for each soil unit the whole
+     solution (strata and allocation) with the smaller sample size is kept. The spatial component is therefore
+     used only in the soil units where it reduces the sample size.
+6. **Sample selection** (`selectSampleSpatial`) and outputs: points, summary tables, report, figures and the
+   strata as polygons, ready to be used in the SML tool.
 
-1. **Defines the sampling frame**: 1 km grid cells, each with model-predicted soil pH (`PH`) and soil organic
-   carbon (`SOC`), their prediction variances, clay content (`ARG`) and elevation (`DEM`).
-2. **Forces in existing LUCAS points** (those with `SOIL == 1` that fall inside the study area) as a
-   take-all (census) stratum, and removes their cells from the frame that is actually sampled.
-3. **Sets the spatial parameters** according to the flag `spatial_component`:
-   - `TRUE`: reads, for every soil unit, `fitting` (R²) and `range` (km) of PH and SOC from `Input/legend.csv`;
-   - `FALSE` (default): no spatial component, `fitting = 1` and `range = 0` in every domain.
-4. **Optimises the stratification** with [SamplingStrata](https://barcaroli.github.io/SamplingStrata/):
-   K-means initial solution (`KmeansSolutionSpatial` if `TRUE`, `KmeansSolution2` if `FALSE`), then a genetic
-   algorithm (`optimStrata`) with Bethel allocation, using the soil-unit fitting/range (`TRUE`) or
-   `fitting = 1`, `range = 0` (`FALSE`), so that the coefficient of variation (CV) of the estimates of PH and
-   SOC is at most **5 % in every domain**.
-5. **Checks the spatial component per domain** (Phase 6b, only if `TRUE`): the GA strata are re-allocated with
-   and without the spatial component, and the non-spatial allocation replaces the spatial one where it needs
-   fewer units.
-6. **Selects the sites** (`selectSampleSpatial`) and exports points, summary tables, figures and the strata as
-   polygons, ready to be used in the SML tool.
+## Inputs (folder `Input/`)
 
-## What the kriging script does
+| File | Content |
+|---|---|
+| `Frame_1km_6_soil_units_Italy.csv` | Sampling frame, one row per 1 km cell: `POINT_ID`, `X_LAEA`, `Y_LAEA` (EPSG:3035), `soil_unit`, target variables with their prediction variance (`PH`, `PH_VAR`, `SOC`, `SOC_VAR`), auxiliary variables (`CLAY`, `DEM`) |
+| `Test_6_soil_units_Italy_legend.csv` | Only if `spatial_component = TRUE`: one row per soil unit with `soil_unit` and, for each target variable `<var>`, `fitting_<var>` (R²) and `range_<var>_km` |
+| `Test_6_soil_units_Italy.gpkg` | Soil-unit polygons: not read by the script, used by the SML tool |
 
-1. Fits regression-kriging variograms (spherical model, trend `x + y + DEM`) on the point-level survey,
-   nationally and per zone (a zone with fewer than 30 valid points, or a degenerate fit, uses the national model).
-2. Assigns to each soil unit the fitting (R² of the variogram fit) and range of its zone and writes
-   `Input/legend.csv`.
-3. Assesses the reliability of the parameters of each soil unit (**ADEQUATE / USE WITH CAUTION / NOT RELIABLE**)
-   from the fitting, the use of the national model, a range capped at the data support, and the size of the
-   range compared with the soil unit, and writes a report with warnings and a recommendation on
-   `spatial_component`.
+The fitting and range values in the example legend are **illustrative**: they are not estimated on the example
+maps. Replace them with your own estimates (see below) before using the spatial component for real results.
 
-In the example data the parameters are classified as **NOT RELIABLE** for all soil units (fitting 0.41 for PH,
-0.49 for SOC, from the national model; ranges of 109 and 80 km against mean distances of 11–72 km inside the
-soil units), so the sampling script is delivered with `spatial_component <- FALSE`.
+## How to estimate fitting (R²) and range
 
-Note: use the last version (1.6) of SamplingStrata by installing it as follows:
+The two parameters describe how well the DSM model predicts each target variable and how far its errors are
+spatially correlated. They are best derived from the same model used to produce the maps, separately for each
+soil unit and each target variable, using the soil observations (e.g. LUCAS or regional surveys) that fall in
+the soil unit.
+
+- **fitting**: R² between observed and predicted values. Out-of-sample values (cross-validation or an
+  independent validation set) are more realistic than the R² of the calibration. Allowed values are in (0, 1].
+- **range**: range of the variogram of the model residuals, in km. SamplingStrata models the correlation between
+  two cells at distance *d* as exp(−*d* / range), so fit an **exponential** model and enter its range
+  parameter, not the practical range (which is about 3 times larger).
+
+Example with `gstat`, for one soil unit and one variable (`obs` is an `sf` object of the observations with the
+observed value `PH`, the predicted value `PH_pred` and coordinates in metres):
+
+```r
+library(gstat)
+obs$res <- obs$PH - obs$PH_pred
+fitting <- cor(obs$PH, obs$PH_pred)^2              # better on validation data
+v       <- variogram(res ~ 1, obs)
+vfit    <- fit.variogram(v, vgm("Exp"))
+range_km <- vfit$range[vfit$model == "Exp"] / 1000  # range parameter, in km
+```
+
+Some practical advice:
+
+- A variogram needs enough observations with a good spatial spread: with only a few dozen points per soil unit
+  the estimate is unstable. In that case, estimate the parameters on a group of similar soil units (same soil
+  region or land use) and assign them to each unit of the group.
+- Check the range against the size of the soil unit: a range much larger than the soil unit, or much smaller
+  than the 1 km grid, usually means that the variogram is poorly identified.
+- When no reliable estimate is possible, set `fitting = 1` and `range = 0` for that soil unit: it is then
+  treated as non-spatial.
+- Low fitting values increase the expected variance, and therefore the sample size: Phases 5b and 5c make sure
+  that the spatial component is kept only where it actually reduces the sample.
+
+## Main parameters (top of the script)
+
+| Parameter | Meaning |
+|---|---|
+| `inp_path`, `out_path` | Input and output folders |
+| `vars_cont_y`, `variance_cont_y` | Target variables and their prediction variance |
+| `vars_cont_x` | Auxiliary (stratification) variables |
+| `min_point_per_domain` | Soil units with fewer cells are dropped |
+| `cv_target` | Target CV of every target variable in every domain (default 0.05) |
+| `min_sample_per_stratum` | Minimum number of sampled units per stratum (≥ 2) |
+| `max_clusters` | Maximum number of K-means clusters per domain |
+| `ga_iter`, `ga_pops` | Generations and population size of the GA: the defaults are for quick tests; use much higher values for final results |
+| `spatial_component` | `TRUE` to use fitting and range from the legend (Phases 5b and 5c are performed) |
+| `use_lucas_grid` | `TRUE` to flag the selected cells that belong to the LUCAS 2 km grid |
+| `base_name` | Prefix of the output files |
+
+## Outputs (folder `Output/`, prefix `base_name`)
+
+| File | Content |
+|---|---|
+| `_summary.txt` | Report: spatial parameters, optimisation, check of the spatial component (Phases 5b and 5c), final sample |
+| `_units.csv` | One row per soil unit: cells, whether it was stratified, selected points, of which on the LUCAS grid |
+| `_allpoints.csv` | One row per selected point: soil unit, stratum, cell id, coordinates (EPSG:3035), LUCAS grid flag |
+| `_sample.csv` | SamplingStrata sample, with weights |
+| `_figures.pdf` | Correlation matrix, CV boxplot, sample maps, points per soil unit |
+| `.gpkg` | 1 km grid with soil unit and sample counts |
+| `_strata_SML.gpkg` | Strata as polygons, for the SML tool |
+| `.RData` | Full workspace |
+
+## Requirements
+
+R (≥ 4.1) with `ggplot2`, `dplyr`, `tidyr`, `sf` and `SamplingStrata` (≥ 1.6). Missing packages are installed
+automatically; SamplingStrata 1.6 is installed from GitHub:
 
 ```r
 pak::pak("barcaroli/SamplingStrata")
 ```
 
-## Repository contents
-
-| Path | Description |
-|---|---|
-| `SML_sampling_example_with_6_Italy_soil_units.R` | Sampling workflow (Phases 1–7) |
-| `Kriging_example_with_6_Italy_soil_units.R` | Variogram fitting, `legend.csv` and reliability report (Phases K1–K4) |
-| `Input/` | Frame (`.csv`/`.gpkg`), soil-unit legend, LUCAS points, point survey, 1 km DEM; `legend.csv` once the kriging script has been run |
-| `Output/` | Results of a reference run (summary, sample, figures, strata, workspace) |
-| `parameters_values_for_SML_tool.txt` | Settings to enter in the SML tool to reuse the strata produced here |
-| `docs/SML_sampling_user_manual.pdf` | User manual: how to customise and run the two scripts |
-| `SML_sampling.Rproj` | RStudio project |
-
-## Requirements
-
-R (≥ 4.1). Sampling script: `sp`, `raster`, `ggplot2`, `dplyr`, `tidyr`, `SamplingStrata` (≥ 1.6), `clhs`,
-`sf`, `terra`, `readxl`, `parallel`, `doParallel`. Kriging script: `sf`, `terra`, `gstat`.
-Both scripts install missing packages automatically.
-
 ## Quick start
 
 1. Open `SML_sampling.Rproj` in RStudio.
-2. Edit the path variables (`inp_path`, `out_path`) at the top of each script, which still point to a different
-   folder. Create the output folder if needed.
-3. Non-spatial design: run `SML_sampling_example_with_6_Italy_soil_units.R` as delivered
-   (`spatial_component <- FALSE`).
-4. Spatial design: run `Kriging_example_with_6_Italy_soil_units.R`, read
-   `<out_path>/Example_with_6_soil_units_kriging_report.txt`, then set `spatial_component <- TRUE` in the
-   sampling script and run it.
-5. Read `<out_path>/Example_with_6_soil_units_summary.txt` first.
-
-See the [user manual](docs/SML_sampling_user_manual.pdf) for the full list of parameters, inputs, outputs and
-troubleshooting.
+2. Edit `inp_path` and `out_path` at the top of the script and create the output folder if needed.
+3. Set the parameters, in particular `spatial_component` (`TRUE` requires the legend with fitting and range).
+4. Run `SML_optimal_sampling_tool.R`.
+5. Read `<out_path>/<base_name>_summary.txt` first.
 
 ## Using the result in the SML tool
 
-Copy `strata_SML.gpkg` to the tool's `Files/Strata/` folder and apply the settings in
+Copy `<base_name>_strata_SML.gpkg` to the tool's `Files/Strata/` folder and apply the settings in
 `parameters_values_for_SML_tool.txt` (soil-unit field `soil_unit`, strata field `stratum_id`).

@@ -1,0 +1,7 @@
+"soil_unit","n_cell","dom_val","n_tot","n_lucas_grid"
+"60.4_Cropland",682,TRUE,21,4
+"60.4_Forest",1259,TRUE,13,4
+"60.7_Cropland",935,TRUE,19,3
+"BA_Cropland",697,TRUE,6,1
+"BE_Cropland",6616,TRUE,4,1
+"DO_Cropland",366,TRUE,60,16

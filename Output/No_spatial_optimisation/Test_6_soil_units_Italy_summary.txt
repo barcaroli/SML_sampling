@@ -1,0 +1,61 @@
+SOIL MONITORING LAW (SML) - OPTIMAL SAMPLING: RESULTS SUMMARY
+Run date            : 2026-11-11 13:35
+Scenario            : Test_6_soil_units_Italy
+Domains             : 6 soil units
+Target variables    : PH, SOC (CV target = 5% in every domain)
+Stratification vars : CLAY, DEM
+spatial_component   : FALSE
+
+==============================================================================
+1. SPATIAL PARAMETERS (Phase 2)
+==============================================================================
+Not used: fitting = 1 and range = 0 in every domain (non-spatial). Initial solution by
+KmeansSolution2 (Phase 4); the legend is not read.
+
+==============================================================================
+2. OPTIMISATION (Phase 5: GA, non-spatial, fitting=1/range=0 everywhere)
+==============================================================================
+Sample size per domain:
+
+ domain     soil unit strata sample size
+      1 60.4_Cropland      3        20.6
+      2   60.4_Forest      2        13.2
+      3 60.7_Cropland      2        20.1
+      4   BA_Cropland      1         5.8
+      5   BE_Cropland      1         5.4
+      6   DO_Cropland      2        60.2
+
+TOTAL (GA result) : 125.3 units in 11 strata
+
+==============================================================================
+3. CHECK OF THE SPATIAL COMPONENT (Phases 5b and 5c)
+==============================================================================
+Not performed (spatial_component = FALSE): the GA result above is the final allocation.
+
+==============================================================================
+4. FINAL SAMPLE
+==============================================================================
+Total sites selected : 126
+  sampled           : 86
+  sampled (LUCAS grid): 40
+
+Expected CV per domain (target 5%), maximum over domains:
+  cv_PH : 0.0251
+  cv_SOC : 0.0500
+
+Sites per domain (domains with at least 2 cells are stratified):
+
+     soil_unit n_cell dom_val n_tot n_lucas_grid
+ 60.4_Cropland    682    TRUE    21            8
+   60.4_Forest   1259    TRUE    13            7
+ 60.7_Cropland    935    TRUE    21            5
+   BA_Cropland    697    TRUE     6            1
+   BE_Cropland   6616    TRUE     5            3
+   DO_Cropland    366    TRUE    60           16
+
+==============================================================================
+5. OTHER NOTES
+==============================================================================
+* The CV of the target variables is computed on the model-predicted values and variances of the frame.
+
+Output files: Test_6_soil_units_Italy_units.csv, _allpoints.csv, _sample.csv, _figures.pdf, .gpkg, .RData, _strata_SML.gpkg
