@@ -1,7 +1,7 @@
-soil_unit,fitting_PH,range_PH_km,fitting_SOC,range_SOC_km
-BA_Cropland,0.88,10.0,0.8,10.0
-BE_Cropland,0.88,10.0,0.8,10.0
-DO_Cropland,0.88,10.0,0.8,10.0
-60.4_Cropland,0.88,10.0,0.8,10.0
-60.4_Forest,0.8,10.0,0.7,10.0
-60.7_Cropland,0.88,10.0,0.8,10.0
+soil_unit,range_PH_km,nugget_PH,range_SOC_km,nugget_SOC
+BA_Cropland,10.0,0.5,10.0,0.5
+BE_Cropland,10.0,0.5,10.0,0.5
+DO_Cropland,10.0,0.5,10.0,0.5
+60.4_Cropland,10.0,0.5,10.0,0.5
+60.4_Forest,10.0,0.5,10.0,0.5
+60.7_Cropland,10.0,0.5,10.0,0.5

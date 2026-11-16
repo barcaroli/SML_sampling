@@ -18,54 +18,57 @@
 #
 # SPATIAL COMPONENT (flag spatial_component, parameters block)
 # ------------------------------------------------------------
-#   TRUE  : for every soil unit the spatial parameters fitting (R2) and range
-#           (km) are read from the legend.
+#   TRUE  : for every soil unit the spatial parameters range (km) and nugget
+#           of each target variable are read from the legend.
 #           They are used in the initial solution (KmeansSolutionSpatial) and
-#           in the genetic algorithm (optimStrata); Phases 5b and 5c are
-#           performed.
+#           in the genetic algorithm (optimStrata); Phase 5b reports the
+#           reduction of the sample size due to the spatial component.
 #   FALSE : no spatial component. The initial solution is computed with
-#           KmeansSolution2, optimStrata runs with fitting = 1 and range = 0
-#           in every domain; Phases 5b and 5c are not performed and the legend is not
-#           needed.
+#           KmeansSolution2, optimStrata runs with range = 0 in every domain;
+#           Phase 5b is not performed and the legend is not needed.
 #
-# Both parameters can come from a kriging model.
-# They are estimated for each soil unit and each target variable:
-#   fitting : R2 between observed and predicted values. Values in (0, 1].
-#   range   : range of the exponential variogram fitted to the residuals,
-#             in km (>= 0).
+# Both parameters describe the spatial correlation of the prediction errors
+# of the DSM, and are estimated, for each soil unit (or group of similar soil
+# units) and each target variable, on the variogram of the out-of-sample
+# residuals (observed - predicted), fitted with an exponential model:
+#   range  : range parameter a of the exponential model, in km (>= 0)
+#            (not the practical range, about 3a: the script uses kappa = 1)
+#   nugget : relative nugget c0 / (c0 + c1), in [0, 1]
+# The variance in the strata is the additive one (de Gruijter et al. 2016):
+# squared differences of the predictions plus prediction-error variances
+# minus their covariance (1 - nugget) s_i s_j exp(-d / range). No R2
+# ("fitting") is used: dividing by R2 as well would count the error variance
+# twice. Requires SamplingStrata with the 'nugget' parameter (version > 1.6).
 #
 # PROCESSING PHASES
 # -----------------------------------------------------------------------------
 #
 # Phase 1  - Set-up and domains. Parameters, frame reading, construction of the
 #            grid.
-# Phase 2  - Spatial parameters. If spatial_component = TRUE, fitting and
-#            range of each target variable are read from the legend for every
-#            soil unit and checked (one row per domain, fitting in (0, 1],
-#            range >= 0). If FALSE, fitting = 1 and range = 0 everywhere.
+# Phase 2  - Spatial parameters. If spatial_component = TRUE, range and
+#            nugget of each target variable are read from the legend for every
+#            soil unit and checked (one row per domain, range >= 0, nugget in
+#            [0, 1]). If FALSE, range = 0 everywhere.
 # Phase 3  - SamplingStrata frame. Cells with non-finite values are dropped;
 #            the frame is built with buildFrameSpatial;
 #            domains with fewer than min_point_per_domain cells are dropped
 #            and domain values are re-indexed; each domain gets the
-#            fitting/range of its soil unit; precision constraints are set to
+#            range/nugget of its soil unit; precision constraints are set to
 #            CV = cv_target in every domain.
 # Phase 4  - Initial solution, domain by domain (at most max_clusters
 #            clusters per domain), with a single-stratum fallback if it fails:
-#            KmeansSolutionSpatial with the soil-unit fitting/range if
+#            KmeansSolutionSpatial with the soil-unit range/nugget if
 #            spatial_component = TRUE, KmeansSolution2 if FALSE.
 # Phase 5  - Genetic algorithm (optimStrata, method = "spatial") starting
 #            from the K-means number of strata, with the soil-unit
-#            fitting/range (TRUE) or with fitting = 1 and range = 0 (FALSE).
-# Phase 5b - Only if spatial_component = TRUE: per-domain check of the
-#            spatial component. The strata of each domain found by the GA are
-#            re-allocated (Bethel) with fitting = 1 / range = 0 and with the
-#            soil-unit fitting/range; the GA (spatial) result is kept where
-#            the spatial version needs no more units, otherwise the
-#            non-spatial allocation of the same strata is used.
-# Phase 5c - Only if spatial_component = TRUE: a second GA is run with
-#            fitting = 1 and range = 0; for each domain the solution (strata
-#            and allocation) with the smaller sample size is kept, Phase 5b
-#            result or non-spatial GA.
+#            range/nugget (TRUE) or with range = 0 (FALSE).
+# Phase 5b - Only if spatial_component = TRUE, report only: the strata found
+#            by the GA are re-allocated (Bethel) without the spatial
+#            component (range = 0), to show the reduction of the sample size
+#            due to the spatial component. The GA result is the final
+#            allocation. (The former selection between spatial and
+#            non-spatial solutions is no longer needed: with the additive
+#            variance the spatial component can only reduce the variance.)
 # Phase 6  - Sample selection (selectSampleSpatial) and output assembly:
 #            sampled points, summary table per domain, report, figures.
 #
@@ -83,16 +86,18 @@
 #   Test_6_soil_units_Italy_legend.csv   legend, only if spatial_component = TRUE:
 #                                        one row per soil unit with columns
 #                                        soil_unit and, for each target variable
-#                                        <var>, fitting_<var> (R2) and
-#                                        range_<var>_km (range in km)
+#                                        <var>, range_<var>_km (range parameter
+#                                        of the exponential variogram, km) and
+#                                        nugget_<var> (relative nugget)
 #   Test_6_soil_units_Italy.gpkg         soil-unit polygons: not read here, used
 #                                        by the SML tool
 # 
 # OUTPUT (folder Output/, prefix Example_with_6_soil_units)
 # -------------------------------------------------------
 #   _summary.txt              text report: spatial parameters used,
-#                             optimisation (Phase 5), spatial check (Phases
-#                             5b and 5c, if performed), final sample
+#                             optimisation (Phase 5), reduction due to the
+#                             spatial component (Phase 5b, if performed),
+#                             final sample
 #   _units.csv                one row per soil unit: number of cells, whether
 #                             it was stratified (at least min_point_per_domain
 #                             cells), number of selected points, of which on
@@ -116,10 +121,11 @@ cran_pkgs <- c("ggplot2", "dplyr", "tidyr", "sf", "pak")
 to_install <- cran_pkgs[!vapply(cran_pkgs, requireNamespace, logical(1), quietly = TRUE)]
 if (length(to_install) > 0) install.packages(to_install)
 
-# SamplingStrata: version 1.6 or later is required. If it is not available
-# (or older), install the current version from GitHub with pak.
+# SamplingStrata: a version with the 'nugget' parameter of optimStrata is
+# required. If it is not available, install the current version from GitHub
+# with pak.
 if (!requireNamespace("SamplingStrata", quietly = TRUE) ||
-    packageVersion("SamplingStrata") < "1.6") {
+    !"nugget" %in% names(formals(SamplingStrata::optimStrata))) {
   pak::pak("barcaroli/SamplingStrata")
 }
 
@@ -159,8 +165,8 @@ max_clusters           <- 5      # maximum number of K-means clusters per domain
 ga_iter <- 15   # number of generations
 ga_pops <- 10   # population size per generation
 
-# TRUE = fitting/range read from the legend (Phases 4, 5, 5b);
-# FALSE = fitting = 1 and range = 0 in every domain, the legend is not read
+# TRUE = range/nugget read from the legend (Phases 4, 5, 5b);
+# FALSE = range = 0 in every domain, the legend is not read
 spatial_component <- FALSE
 
 use_lucas_grid <- TRUE   # TRUE to flag the cells of the LUCAS grid (POINT_ID > 0)
@@ -189,27 +195,41 @@ dat <- st_as_sf(grid_df, coords = c("X_LAEA", "Y_LAEA"), crs = 3035, remove = FA
 # ---------------------------------------------------------------------------
 # Phase 2 -- Spatial parameters per soil unit
 #
-# spatial_component = TRUE: the legend gives, for
-# each soil unit (soil_unit), the columns fitting_<var> (R2, in (0, 1])
-# and range_<var>_km (range in km, >= 0) of every target variable in
-# vars_cont_y. Other columns are ignored.
-# A row with fitting = 1 and range = 0 makes that soil unit non-spatial.
-# The tables fitting_by_su / range_by_su_km (one row per dom_code
+# spatial_component = TRUE: the legend gives, for each soil unit (soil_unit),
+# the columns range_<var>_km (range parameter of the exponential variogram of
+# the prediction errors, in km, >= 0) and nugget_<var> (relative nugget
+# c0/(c0+c1), in [0, 1]) of every target variable in vars_cont_y. A missing
+# nugget column is taken as 0. Other columns are ignored, except fitting_<var>
+# (old format): values < 1 are rejected, because dividing by R2 together with
+# the prediction-error variances would count the error variance twice.
+# A row with range = 0 (or nugget = 1) makes that soil unit non-spatial.
+# The tables range_by_su_km / nugget_by_su (one row per dom_code
 # = soil_unit, one column per target variable) are used in Phases 3-5b.
 #
-# spatial_component = FALSE: the legend is not read; fitting = 1 and
-# range = 0 are used for every domain (Phase 3).
+# spatial_component = FALSE: the legend is not read; range = 0 is used for
+# every domain (Phase 3).
 # ---------------------------------------------------------------------------
 if (spatial_component) {
   if (!file.exists(legend_csv_path))
     stop("spatial_component = TRUE but the legend was not found at: ", legend_csv_path,
          "\nProvide the legend in the input folder, or set spatial_component <- FALSE.")
   legend_par <- read.csv(legend_csv_path, stringsAsFactors = FALSE, check.names = FALSE)
-  fit_cols <- paste0("fitting_", vars_cont_y)
   rng_cols <- paste0("range_", vars_cont_y, "_km")
-  miss_cols <- setdiff(c("soil_unit", fit_cols, rng_cols), names(legend_par))
+  nug_cols <- paste0("nugget_", vars_cont_y)
+  fit_cols <- paste0("fitting_", vars_cont_y)
+  miss_cols <- setdiff(c("soil_unit", rng_cols), names(legend_par))
   if (length(miss_cols) > 0)
     stop("Legend: missing column(s): ", paste(miss_cols, collapse = ", "))
+  for (nc in setdiff(nug_cols, names(legend_par))) {
+    message("Legend: column ", nc, " not found, nugget = 0 assumed")
+    legend_par[[nc]] <- 0
+  }
+  old_fit <- intersect(fit_cols, names(legend_par))
+  if (length(old_fit) > 0 && any(as.matrix(legend_par[, old_fit]) < 1, na.rm = TRUE))
+    stop("Legend: fitting values < 1 are no longer used. The prediction-error variances ",
+         "of the frame already account for the levelling of the predictions, and dividing ",
+         "by R2 as well would count the error variance twice: remove the fitting columns ",
+         "and give range and nugget of the prediction errors.")
   legend_par$dom_code <- legend_par$soil_unit
   if (any(duplicated(legend_par$dom_code)))
     stop("Legend: duplicated soil unit(s): ",
@@ -218,31 +238,30 @@ if (spatial_component) {
   if (length(miss_dom) > 0)
     stop("Legend: no row for the soil unit(s) of the frame: ", paste(miss_dom, collapse = ", "),
          "\n(soil_unit must match the frame exactly)")
-  fit_vals <- as.matrix(legend_par[, fit_cols])
   rng_vals <- as.matrix(legend_par[, rng_cols])
-  # fitting = 0 is rejected by SamplingStrata (division by zero in the spatial
-  # variance); fitting > 1 or negative ranges have no meaning.
-  if (any(!is.finite(fit_vals)) || any(fit_vals <= 0 | fit_vals > 1))
-    stop("Legend: every fitting value must be in (0, 1]")
+  nug_vals <- as.matrix(legend_par[, nug_cols])
   if (any(!is.finite(rng_vals)) || any(rng_vals < 0))
     stop("Legend: every range value must be >= 0 (km)")
+  if (any(!is.finite(nug_vals)) || any(nug_vals < 0 | nug_vals > 1))
+    stop("Legend: every nugget value must be in [0, 1] (relative nugget c0/(c0+c1))")
 
-  fitting_by_su <- as.data.frame(fit_vals, row.names = legend_par$dom_code)
-  colnames(fitting_by_su) <- vars_cont_y
   range_by_su_km <- as.data.frame(rng_vals, row.names = legend_par$dom_code)
   colnames(range_by_su_km) <- vars_cont_y
+  nugget_by_su <- as.data.frame(nug_vals, row.names = legend_par$dom_code)
+  colnames(nugget_by_su) <- vars_cont_y
 
-  cat("\nSpatial parameters read from the legend (fitting = R2, range in km):\n")
-  print(cbind(fitting_by_su, setNames(range_by_su_km, paste0("range_", vars_cont_y, "_km"))))
+  cat("\nSpatial parameters read from the legend (range in km, relative nugget):\n")
+  print(cbind(setNames(range_by_su_km, paste0("range_", vars_cont_y, "_km")),
+              setNames(nugget_by_su, paste0("nugget_", vars_cont_y))))
 } else {
-  message("spatial_component = FALSE: fitting = 1 and range = 0 in every domain; the legend is not read.")
+  message("spatial_component = FALSE: range = 0 in every domain; the legend is not read.")
 }
 
 
 # ---------------------------------------------------------------------------
 # Phase 3 -- SamplingStrata frame construction. Y and variance come from the
-# frame itself (predicted target variables and their variance); fitting/range come from
-# the legend (Phase 2) if spatial_component = TRUE, else fitting = 1, range = 0.
+# frame itself (predicted target variables and their variance); range/nugget come from
+# the legend (Phase 2) if spatial_component = TRUE, else range = 0.
 # ---------------------------------------------------------------------------
 df2 <- st_drop_geometry(dat)
 # Drop cells with missing/non-finite X, Y or variance: optimStrata(method =
@@ -303,26 +322,26 @@ domain_map <- data.frame(
 )
 frame$domainvalue <- domain_map$new[match(frame$domainvalue, domain_map$old)]
 
-# Assign each re-indexed domain the fitting (R2) and range of its OWN soil
-# unit: from the legend (Phase 2) if spatial_component = TRUE, otherwise
-# fitting = 1 and range = 0. The key is dom_code_str (soil_unit).
-# fitting_by_domain / range_by_domain_km: one row per re-indexed domain
+# Assign each re-indexed domain the range and nugget of its OWN soil unit:
+# from the legend (Phase 2) if spatial_component = TRUE, otherwise range = 0
+# and nugget = 0. The key is dom_code_str (soil_unit).
+# range_by_domain_km / nugget_by_domain: one row per re-indexed domain
 # (rownames "1", "2", ...), one column per target variable; the GA receives
 # the range in metres (range_by_domain_m), like the grid coordinates.
 new_to_str <- dom_code_to_num$dom_code_str[match(domain_map$old, dom_code_to_num$domainvalue)]
 
 ny <- length(vars_cont_y)
 if (spatial_component) {
-  fitting_by_domain  <- fitting_by_su[new_to_str, , drop = FALSE]
   range_by_domain_km <- range_by_su_km[new_to_str, , drop = FALSE]
+  nugget_by_domain   <- nugget_by_su[new_to_str, , drop = FALSE]
 } else {
-  fitting_by_domain  <- as.data.frame(matrix(1, nrow = length(new_to_str), ncol = ny,
-                                             dimnames = list(NULL, vars_cont_y)))
   range_by_domain_km <- as.data.frame(matrix(0, nrow = length(new_to_str), ncol = ny,
                                              dimnames = list(NULL, vars_cont_y)))
+  nugget_by_domain   <- as.data.frame(matrix(0, nrow = length(new_to_str), ncol = ny,
+                                             dimnames = list(NULL, vars_cont_y)))
 }
-rownames(fitting_by_domain)  <- as.character(seq_len(nrow(fitting_by_domain)))
 rownames(range_by_domain_km) <- as.character(seq_len(nrow(range_by_domain_km)))
+rownames(nugget_by_domain)   <- as.character(seq_len(nrow(nugget_by_domain)))
 range_by_domain_m <- range_by_domain_km * 1000
 
 
@@ -343,7 +362,7 @@ cv <- as.data.frame(c(
 # Phase 4 -- K-means clustering to provide strata initial solutions
 # Run domain by domain (lapply over domain IDs):
 #   spatial_component = TRUE : KmeansSolutionSpatial, with the domain's own
-#                              soil-unit fitting/range from the legend;
+#                              soil-unit range/nugget from the legend;
 #   spatial_component = FALSE: KmeansSolution2 (non-spatial; it clusters on
 #                              the Y values and evaluates each clustering
 #                              with the non-spatial Bethel allocation).
@@ -388,13 +407,13 @@ kmean_list <- lapply(sort(unique(frame$domainvalue)), function(dv) {
   k_max <- min(max_k[[as.character(dv)]], nrow(f_sub) - 1L)
   k_max <- max(k_max, 1L)
   if (spatial_component) {
-    fitting_dv <- as.numeric(fitting_by_domain[as.character(dv), ])
     range_dv   <- as.numeric(range_by_domain_m[as.character(dv), ])   # metres, like the coordinates
+    nugget_dv  <- as.numeric(nugget_by_domain[as.character(dv), ])
     res <- tryCatch(
       KmeansSolutionSpatial(frame       = f_sub,
-                            fitting     = fitting_dv,
                             range       = range_dv,
-                            kappa       = 1,
+                            kappa       = 1,     # range = range parameter of the exponential model
+                            nugget      = nugget_dv,
                             errors      = cv_sub,
                             nstrata     = NA,
                             minnumstrat = min_sample_per_stratum,
@@ -459,12 +478,12 @@ nstrat        <- pmax(nstrat, 2L)   # at least 2 strata per domain
 # ---------------------------------------------------------------------------
 # Phase 5 -- Genetic algorithm (GA) optimisation of the stratification
 #
-# spatial_component = TRUE : the GA runs with the soil-unit fitting/range read
-#                            from the legend (fitting_by_domain /
-#                            range_by_domain_m), i.e. it searches the optimal
+# spatial_component = TRUE : the GA runs with the soil-unit range/nugget read
+#                            from the legend (range_by_domain_m /
+#                            nugget_by_domain), i.e. it searches the optimal
 #                            stratification under the spatial variance.
-# spatial_component = FALSE: the GA runs with fitting = 1 and range = 0 in
-#                            every domain (non-spatial).
+# spatial_component = FALSE: the GA runs with range = 0 in every domain
+#                            (non-spatial).
 # ---------------------------------------------------------------------------
 set.seed(1234)    # the seed "kmeans1d" uses stats::kmeans()
 sugg <- prepareSuggestion(frame, nStrata = nstrat)
@@ -481,9 +500,9 @@ args <- list(
   pops = ga_pops,
   minnumstr = min_sample_per_stratum,
   nStrata = nstrat,    # initial number of strata (from K-means)
-  fitting = fitting_by_domain,   # legend values, or 1 everywhere (Phase 3)
   range = range_by_domain_m,     # legend values in metres, or 0 everywhere (Phase 3)
-  kappa = 1,
+  nugget = nugget_by_domain,     # legend values, or 0 everywhere (Phase 3)
+  kappa = 1,                     # range = range parameter of the exponential model
   suggestions = sugg,
   writeFiles = FALSE,
   showPlot = FALSE,
@@ -495,154 +514,61 @@ solution <- do.call(optimStrata, args)
 # GA results
 framenew  <- solution$framenew
 outstrata <- solution$aggr_strata
-ga_label  <- if (spatial_component) "spatial, fitting/range from the legend" else "non-spatial, fitting=1/range=0 everywhere"
+ga_label  <- if (spatial_component) "spatial, range/nugget from the legend" else "non-spatial, range = 0 everywhere"
 cat(sprintf("\nGA result (%s): total sample size = %.1f, %d strata\n",
             ga_label, sum(outstrata$SOLUZ), nrow(outstrata)))
 
 
-# Keep the ORIGINAL (GA) outstrata: it is the reference of the report and,
-# with spatial_component = TRUE, the starting point of Phase 5b.
+# Keep the GA outstrata: it is the final allocation and the reference of the
+# report.
 outstrata_raw <- outstrata
 
 # ---------------------------------------------------------------------------
-# Phase 5b -- (only if spatial_component = TRUE) POST-HOC per-domain check:
-# does the spatial component reduce the sample size on the GA strata?
+# Phase 5b -- (only if spatial_component = TRUE) REPORT ONLY: reduction of the
+# sample size due to the spatial component.
 #
-# For each domain, its OWN final GA stratification (framenew$STRATO, already
-# fixed at this point, optimised under the spatial setting) is re-allocated
-# under two settings -- the soil-unit fitting/range from the legend (should
-# reproduce the GA's own result, a sanity check) and fitting = 1 / range = 0
-# (non-spatial) -- via the exact same fitness formula the GA itself uses
-# internally (buildStrataDFSpatial + bethel_cpp, both non-exported/internal
-# functions of SamplingStrata, accessed via :::). Both recomputed allocations
-# are compared on the SAME strata:
-#   - spatial needs no more units  -> the GA result of the domain is kept
-#                                     untouched (no solver noise from the
-#                                     standalone recompute enters the result);
-#   - non-spatial needs fewer units -> the domain's rows of outstrata are
-#                                     replaced by the non-spatial allocation of
-#                                     the same strata.
-# With spatial_component = FALSE this phase is skipped: the GA result is the
-# final allocation.
+# For each domain, its own GA stratification (framenew$STRATO) is re-allocated
+# (Bethel) without the spatial component (range = 0), via the same functions
+# the GA uses internally (buildStrataDFSpatial + bethel_cpp, internal functions
+# of SamplingStrata accessed via :::). The difference from the GA allocation is
+# the reduction due to the spatial component on the same strata. The GA result
+# is not changed: with the additive variance (no division by R2) the spatial
+# component can only reduce the variance of a stratum, so no selection between
+# spatial and non-spatial solutions is needed.
 # ---------------------------------------------------------------------------
-domain_choice <- character(0)
 domain_log <- list()   # one row per domain, for the summary report
-
+nospatial_total <- NA_real_
 if (spatial_component) {
   buildStrataDFSpatial <- SamplingStrata:::buildStrataDFSpatial
   bethel_cpp <- SamplingStrata:::bethel_cpp
-
-  domain_recompute_strata <- function(dv, fit_vec, range_vec_m) {
+  nospatial_total <- 0
+  for (dv in sort(unique(framenew$DOMAINVALUE))) {
     sub <- framenew[framenew$DOMAINVALUE == dv, ]
     strato_levels <- sort(unique(sub$STRATO))
     sub$X1 <- match(sub$STRATO, strato_levels)  # re-index to 1..k for buildStrataDFSpatial
     sub$DOMAINVALUE <- 1L
     colnames(sub) <- toupper(colnames(sub))
-    strata <- buildStrataDFSpatial(dataset = sub[, c("ID", "X1", "LON", "LAT",
-                                                     paste0("Y", seq_len(ny)), paste0("VAR", seq_len(ny)),
-                                                     "DOMAINVALUE")],
-                                    fitting = fit_vec, range = range_vec_m, kappa = 1,
-                                    progress = FALSE, verbose = FALSE)
-    strata$DOM1 <- 1L
+    st_ns <- buildStrataDFSpatial(dataset = sub[, c("ID", "X1", "LON", "LAT",
+                                                    paste0("Y", seq_len(ny)), paste0("VAR", seq_len(ny)),
+                                                    "DOMAINVALUE")],
+                                  range = rep(0, ny), kappa = 1,
+                                  progress = FALSE, verbose = FALSE)
+    st_ns$DOM1 <- 1L
     cv_dv <- cv[cv$domainvalue == dv, , drop = FALSE]
     cv_dv$domainvalue <- 1L
-    soluz <- tryCatch(bethel_cpp(strata, cv_dv, minnumstr = min_sample_per_stratum, realAllocation = TRUE),
-                       error = function(e) rep(NA_real_, nrow(strata)))
-    strata$SOLUZ  <- as.numeric(soluz)
-    strata$DOM1   <- dv                        # restore real domain id, for merging into outstrata
-    strata$STRATO <- strato_levels[strata$X1]  # map the 1..k index back to the GA's own STRATO labels
-    strata
-  }
-
-  outstrata_final <- outstrata[0, ]
-  # spatial_recomputed_total accumulates the standalone spatial recompute of
-  # every domain: compared with the GA total it shows the solver-convergence
-  # noise between the GA's own internal Bethel allocation and an independent
-  # bethel_cpp call on the identical configuration (expected to be small).
-  spatial_recomputed_total   <- 0
-  nospatial_recomputed_total <- 0
-  for (dv in sort(unique(framenew$DOMAINVALUE))) {
-    cat("\nDomain: ", dv)
-    fit_real   <- as.numeric(fitting_by_domain[as.character(dv), ])
-    rng_real_m <- as.numeric(range_by_domain_m[as.character(dv), ])
-
-    strata_spatial   <- domain_recompute_strata(dv, fit_real, rng_real_m)
-    strata_nospatial <- domain_recompute_strata(dv, rep(1, ny), rep(0, ny))
-
-    n_spatial   <- sum(strata_spatial$SOLUZ, na.rm = TRUE)
-    n_nospatial <- sum(strata_nospatial$SOLUZ, na.rm = TRUE)
-    use_spatial <- is.finite(n_spatial) && (n_spatial <= n_nospatial || !is.finite(n_nospatial))
-    spatial_recomputed_total   <- spatial_recomputed_total   + if (is.finite(n_spatial)) n_spatial else 0
-    nospatial_recomputed_total <- nospatial_recomputed_total + if (is.finite(n_nospatial)) n_nospatial else 0
-
+    n_ns <- tryCatch(sum(bethel_cpp(st_ns, cv_dv, minnumstr = min_sample_per_stratum,
+                                    realAllocation = TRUE)),
+                     error = function(e) NA_real_)
+    nospatial_total <- nospatial_total + n_ns
     ga_reg <- outstrata_raw[outstrata_raw$DOM1 == dv, ]
-    winner <- if (use_spatial) ga_reg else strata_nospatial
     domain_log[[length(domain_log) + 1]] <- data.frame(
       domain = dv, dom_code = new_to_str[dv],
-      setNames(as.list(fit_real), paste0("fit_", vars_cont_y)),
-      setNames(as.list(rng_real_m / 1000), paste0("range_", vars_cont_y, "_km")),
       n_strata_ga = nrow(ga_reg), n_ga = sum(ga_reg$SOLUZ, na.rm = TRUE),
-      n_nospatial = n_nospatial, n_spatial = n_spatial,
-      n_strata_final = nrow(winner), n_final = sum(winner$SOLUZ, na.rm = TRUE),
-      choice = if (use_spatial) "spatial" else "nospatial", stringsAsFactors = FALSE)
-    outstrata_final <- rbind(outstrata_final, winner[, names(outstrata_final)])
-    domain_choice[as.character(dv)] <- if (use_spatial) "spatial" else "nospatial"
+      n_nospatial = n_ns, stringsAsFactors = FALSE)
   }
-
-  cat("\n=== Phase 5b: does the spatial component reduce the sample size on the GA strata, per domain? ===\n")
-  print(table(domain_choice))
-  cat(sprintf("Total sample size, GA result (spatial):                              %.1f\n", sum(outstrata_raw$SOLUZ)))
-  cat(sprintf("Total sample size, spatial recomputed on the same strata:            %.1f   (difference = solver noise)\n",
-              spatial_recomputed_total))
-  cat(sprintf("Total sample size, non-spatial (fitting=1/range=0) on the same strata: %.1f\n",
-              nospatial_recomputed_total))
-  cat(sprintf("Total sample size, after Phase 5b:                                   %.1f\n", sum(outstrata_final$SOLUZ)))
-
-  # From here on, `outstrata` is the Phase-5b table: every domain uses
-  # whichever setting gave it the smaller allocation on its own GA strata.
-  # All downstream code (summaryStrata, sampling, outputs) simply uses it.
-  outstrata <- outstrata_final
-
-  # -------------------------------------------------------------------------
-  # Phase 5c -- (only if spatial_component = TRUE) non-spatial GA and final
-  # choice per domain. A second GA is run with fitting = 1 / range = 0 in
-  # every domain; for each domain the whole solution (strata + allocation)
-  # with the smaller sample size is kept: Phase 5b result or non-spatial GA.
-  # -------------------------------------------------------------------------
-  set.seed(1234)
-  args_ns <- args
-  args_ns$fitting <- as.data.frame(matrix(1, nrow = nrow(fitting_by_domain), ncol = ny,
-                                          dimnames = dimnames(fitting_by_domain)))
-  args_ns$range   <- as.data.frame(matrix(0, nrow = nrow(range_by_domain_m), ncol = ny,
-                                          dimnames = dimnames(range_by_domain_m)))
-  solution_ns  <- do.call(optimStrata, args_ns)
-  framenew_ns  <- solution_ns$framenew
-  outstrata_ns <- solution_ns$aggr_strata
-
-  framenew_5c  <- framenew[0, ]
-  outstrata_5c <- outstrata_final[0, ]
-  for (dv in sort(unique(framenew$DOMAINVALUE))) {
-    n_5b    <- sum(outstrata_final$SOLUZ[outstrata_final$DOM1 == dv], na.rm = TRUE)
-    n_ns_ga <- sum(outstrata_ns$SOLUZ[outstrata_ns$DOM1 == dv], na.rm = TRUE)
-    keep_ns <- is.finite(n_ns_ga) && n_ns_ga < n_5b
-    fn <- if (keep_ns) framenew_ns else framenew
-    os <- if (keep_ns) outstrata_ns else outstrata_final
-    framenew_5c  <- rbind(framenew_5c,  fn[fn$DOMAINVALUE == dv, names(framenew_5c)])
-    outstrata_5c <- rbind(outstrata_5c, os[os$DOM1 == dv, names(outstrata_5c)])
-    i <- which(sapply(domain_log, function(d) d$domain) == dv)
-    domain_log[[i]]$n_ga_nospatial <- n_ns_ga
-    domain_log[[i]]$n_strata_final <- sum(os$DOM1 == dv)
-    domain_log[[i]]$n_final        <- if (keep_ns) n_ns_ga else n_5b
-    if (keep_ns) domain_log[[i]]$choice <- "nospatial GA"
-  }
-  cat(sprintf("Total sample size, non-spatial GA (Phase 5c):                       %.1f\n", sum(outstrata_ns$SOLUZ)))
-  cat(sprintf("Total sample size, after Phase 5c:                                   %.1f\n", sum(outstrata_5c$SOLUZ)))
-
-  # From here on, framenew/outstrata are the Phase-5c solution
-  framenew  <- framenew_5c
-  outstrata <- outstrata_5c
+  cat(sprintf("\nTotal sample size, GA result (spatial)          : %.1f\n", sum(outstrata_raw$SOLUZ)))
+  cat(sprintf("Total sample size, same strata without spatial component: %.1f\n", nospatial_total))
 } else {
-  # No Phase 5b: the GA (non-spatial) result is the final allocation.
   for (dv in sort(unique(framenew$DOMAINVALUE))) {
     ga_reg <- outstrata_raw[outstrata_raw$DOM1 == dv, ]
     domain_log[[length(domain_log) + 1]] <- data.frame(
@@ -650,7 +576,6 @@ if (spatial_component) {
       n_strata_ga = nrow(ga_reg), n_ga = sum(ga_reg$SOLUZ, na.rm = TRUE),
       stringsAsFactors = FALSE)
   }
-  outstrata_final <- outstrata_raw
 }
 
 # ---------------------------------------------------------------------------
@@ -748,16 +673,17 @@ add("spatial_component   : ", spatial_component)
 
 hdr("1. SPATIAL PARAMETERS (Phase 2)")
 if (spatial_component) {
-  add("Read from ", legend_csv_path, ". fitting = R2; range in km.")
+  add("Read from ", legend_csv_path, ". Range parameter of the exponential variogram of the")
+  add("prediction errors (km, kappa = 1) and relative nugget c0/(c0+c1).")
   add("Used in KmeansSolutionSpatial (Phase 4) and optimStrata (Phase 5).\n")
   par_out <- data.frame(domain = seq_along(new_to_str),
                         soil_unit = new_to_str,
-                        round(setNames(fitting_by_domain, paste0("fit_", vars_cont_y)), 3),
                         round(setNames(range_by_domain_km, paste0("range_", vars_cont_y, "_km")), 1),
+                        round(setNames(nugget_by_domain, paste0("nugget_", vars_cont_y)), 3),
                         check.names = FALSE)
   addt(par_out)
 } else {
-  add("Not used: fitting = 1 and range = 0 in every domain (non-spatial). Initial solution by")
+  add("Not used: range = 0 in every domain (non-spatial). Initial solution by")
   add("KmeansSolution2 (Phase 4); the legend is not read.")
 }
 
@@ -769,35 +695,22 @@ names(ga_out) <- c("domain", "soil unit", "strata", "sample size")
 addt(ga_out)
 add("\nTOTAL (GA result) : ", round(sum(outstrata_raw$SOLUZ), 1), " units in ", nrow(outstrata_raw), " strata")
 
-hdr("3. CHECK OF THE SPATIAL COMPONENT (Phases 5b and 5c)")
+hdr("3. REDUCTION DUE TO THE SPATIAL COMPONENT (Phase 5b)")
 if (!spatial_component) {
-  add("Not performed (spatial_component = FALSE): the GA result above is the final allocation.")
+  add("Not performed (spatial_component = FALSE).")
 } else {
-  add("For each domain the strata found by the GA are re-allocated (Bethel) with the soil-unit")
-  add("fitting and range and with fitting = 1 / range = 0; the GA (spatial) result is kept where")
-  add("the spatial version needs no more units, otherwise the non-spatial allocation of the same")
-  add("strata is used (Phase 5b). Then a non-spatial GA is run and, for each domain, the solution")
-  add("with the smaller sample size is kept (Phase 5c).\n")
-  sp_cols <- c("domain", "soil_unit", "n_nospatial", "n_spatial", "n_ga_nospatial", "n_final", "choice")
-  sp_out <- dom_tab[, sp_cols]
-  sp_out[, sp_cols[3:6]] <- round(sp_out[, sp_cols[3:6]], 1)
-  names(sp_out) <- c("domain", "soil unit", "n non-spatial (5b)", "n spatial (5b)",
-                     "n non-spatial GA (5c)", "n final", "choice")
+  add("The strata found by the GA are re-allocated (Bethel) without the spatial component")
+  add("(range = 0). The GA result is the final allocation.\n")
+  sp_out <- dom_tab[, c("domain", "soil_unit", "n_ga", "n_nospatial")]
+  sp_out$difference <- sp_out$n_nospatial - sp_out$n_ga
+  sp_out[, 3:5] <- round(sp_out[, 3:5], 1)
+  names(sp_out) <- c("domain", "soil unit", "n spatial (GA)", "n without spatial component",
+                     "reduction")
   addt(sp_out)
-  n_ns_all <- nospatial_recomputed_total
-  n_sp_all <- spatial_recomputed_total
-  add("\nDomains where the spatial version was kept : ", sum(dom_tab$choice == "spatial"), " of ", nrow(dom_tab))
-  add("TOTAL, GA result (spatial)                  : ", round(sum(outstrata_raw$SOLUZ), 1))
-  add("TOTAL, spatial recomputed (same strata)     : ", round(n_sp_all, 1),
-      "   (difference from GA = ", round(n_sp_all - sum(outstrata_raw$SOLUZ), 1),
-      ": solver noise between independent Bethel calls)")
-  add("TOTAL, non-spatial on the same strata       : ", round(n_ns_all, 1))
-  add("TOTAL, final allocation after Phase 5b      : ", round(sum(outstrata_final$SOLUZ), 1))
-  add("TOTAL, non-spatial GA (Phase 5c)            : ", round(sum(outstrata_ns$SOLUZ), 1))
-  add("TOTAL, final allocation after Phase 5c      : ", round(sum(outstrata$SOLUZ), 1))
-  add("Reduction due to the spatial component      : ", round(sum(outstrata_ns$SOLUZ) - sum(outstrata$SOLUZ), 1),
-      " units (", round(100 * (sum(outstrata_ns$SOLUZ) - sum(outstrata$SOLUZ)) / sum(outstrata_ns$SOLUZ), 1),
-      "% of the non-spatial GA total)")
+  add("\nTOTAL, GA result (spatial)                      : ", round(sum(outstrata_raw$SOLUZ), 1))
+  add("TOTAL, same strata without spatial component    : ", round(nospatial_total, 1))
+  add("Reduction due to the spatial component          : ", round(nospatial_total - sum(outstrata_raw$SOLUZ), 1),
+      " units (", round(100 * (nospatial_total - sum(outstrata_raw$SOLUZ)) / nospatial_total, 1), "%)")
 }
 
 hdr("4. FINAL SAMPLE")
