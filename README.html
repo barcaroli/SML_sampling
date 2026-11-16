@@ -360,8 +360,7 @@ under the Soil Monitoring Law</h1>
 to the Soil Monitoring Law (SML). It is developed at ISPRA by Claudia
 Cagnarini and Giulio Barcaroli.</p>
 <p>The included data are a <strong>worked example on a small test area
-in Italy</strong>: 6 soil units (soil unit × land use,
-e.g. <code>BA_Cropland</code>, <code>60.4_Forest</code>) on a 1 km grid.
+in Italy</strong>: 3 soil units (soil unit × land use) on a 1 km grid.
 The soil units are the estimation domains.</p>
 <div id="what-the-script-does" class="section level2">
 <h2>What the script does</h2>
@@ -416,7 +415,7 @@ polygons, ready to be used in the SML tool.</li>
 </thead>
 <tbody>
 <tr class="odd">
-<td><code>Frame_1km_6_soil_units_Italy.csv</code></td>
+<td><code>Frame_1km_3_soil_units_Italy.csv</code></td>
 <td>Sampling frame, one row per 1 km cell: <code>POINT_ID</code>,
 <code>X_LAEA</code>, <code>Y_LAEA</code> (EPSG:3035),
 <code>soil_unit</code>, target variables with their prediction variance
@@ -425,7 +424,7 @@ polygons, ready to be used in the SML tool.</li>
 <code>DEM</code>)</td>
 </tr>
 <tr class="even">
-<td><code>Test_6_soil_units_Italy_legend.csv</code></td>
+<td><code>Test_3_soil_units_Italy_legend.csv</code></td>
 <td>Only if <code>spatial_component = TRUE</code>: one row per soil unit
 with <code>soil_unit</code> and, for each target variable
 <code>&lt;var&gt;</code>, <code>range_&lt;var&gt;_km</code> (range
@@ -434,7 +433,7 @@ parameter of the exponential variogram of the prediction errors, km) and
 column is missing)</td>
 </tr>
 <tr class="odd">
-<td><code>Test_6_soil_units_Italy.gpkg</code></td>
+<td><code>Test_3_soil_units_Italy.gpkg</code></td>
 <td>Soil-unit polygons: not read by the script, used by the SML
 tool</td>
 </tr>

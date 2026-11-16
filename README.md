@@ -3,8 +3,7 @@
 This repository contains an R workflow that selects the **sampling sites of a soil monitoring network**
 according to the Soil Monitoring Law (SML). It is developed at ISPRA by Claudia Cagnarini and Giulio Barcaroli.
 
-The included data are a **worked example on a small test area in Italy**: 6 soil units (soil unit × land use,
-e.g. `BA_Cropland`, `60.4_Forest`) on a 1 km grid. The soil units are the estimation domains.
+The included data are a **worked example on a small test area in Italy**: 3 soil units (soil unit × land use) on a 1 km grid. The soil units are the estimation domains.
 
 ## What the script does
 
@@ -32,9 +31,9 @@ The script `SML_optimal_sampling_tool.R` runs in six phases:
 
 | File | Content |
 |---|---|
-| `Frame_1km_6_soil_units_Italy.csv` | Sampling frame, one row per 1 km cell: `POINT_ID`, `X_LAEA`, `Y_LAEA` (EPSG:3035), `soil_unit`, target variables with their prediction variance (`PH`, `PH_VAR`, `SOC`, `SOC_VAR`), auxiliary variables (`CLAY`, `DEM`) |
-| `Test_6_soil_units_Italy_legend.csv` | Only if `spatial_component = TRUE`: one row per soil unit with `soil_unit` and, for each target variable `<var>`, `range_<var>_km` (range parameter of the exponential variogram of the prediction errors, km) and `nugget_<var>` (relative nugget c0/(c0+c1); 0 if the column is missing) |
-| `Test_6_soil_units_Italy.gpkg` | Soil-unit polygons: not read by the script, used by the SML tool |
+| `Frame_1km_3_soil_units_Italy.csv` | Sampling frame, one row per 1 km cell: `POINT_ID`, `X_LAEA`, `Y_LAEA` (EPSG:3035), `soil_unit`, target variables with their prediction variance (`PH`, `PH_VAR`, `SOC`, `SOC_VAR`), auxiliary variables (`CLAY`, `DEM`) |
+| `Test_3_soil_units_Italy_legend.csv` | Only if `spatial_component = TRUE`: one row per soil unit with `soil_unit` and, for each target variable `<var>`, `range_<var>_km` (range parameter of the exponential variogram of the prediction errors, km) and `nugget_<var>` (relative nugget c0/(c0+c1); 0 if the column is missing) |
+| `Test_3_soil_units_Italy.gpkg` | Soil-unit polygons: not read by the script, used by the SML tool |
 
 The range and nugget values in the example legend are **illustrative**: they are not estimated on the example
 maps. Replace them with your own estimates (see below) before using the spatial component for real results.

@@ -75,7 +75,7 @@
 #
 # INPUT (folder Input/)
 # ---------------------
-#   Frame_1km_6_soil_units_Italy.csv     sampling frame: one row per 1 km cell,
+#   Frame_1km_3_soil_units_Italy.csv     sampling frame: one row per 1 km cell,
 #                                        with the coordinates (X_LAEA, Y_LAEA,
 #                                        EPSG:3035), the soil unit (soil_unit),
 #                                        the DSM predictions of the target
@@ -83,16 +83,16 @@
 #                                        variance, and the auxiliary variables. 
 #                                        The cells of the LUCAS 2 km grid have 
 #                                        POINT_ID > 0
-#   Test_6_soil_units_Italy_legend.csv   legend, only if spatial_component = TRUE:
+#   Test_3_soil_units_Italy_legend.csv   legend, only if spatial_component = TRUE:
 #                                        one row per soil unit with columns
 #                                        soil_unit and, for each target variable
 #                                        <var>, range_<var>_km (range parameter
 #                                        of the exponential variogram, km) and
 #                                        nugget_<var> (relative nugget)
-#   Test_6_soil_units_Italy.gpkg         soil-unit polygons: not read here, used
+#   Test_3_soil_units_Italy.gpkg         soil-unit polygons: not read here, used
 #                                        by the SML tool
 # 
-# OUTPUT (folder Output/, prefix Example_with_6_soil_units)
+# OUTPUT (folder Output/, prefix Example_with_3_soil_units)
 # -------------------------------------------------------
 #   _summary.txt              text report: spatial parameters used,
 #                             optimisation (Phase 5), reduction due to the
@@ -140,11 +140,11 @@ library(sf)
 # Modify the following paths:
 inp_path <- "insert path\\Input\\"
 out_path <- "insert path\\Output\\"
-inp_path <- "D:\\Google Drive\\ISPRA\\SML_optimal_sampling_tool_IT\\Input\\"
-out_path <- "D:\\Google Drive\\ISPRA\\SML_optimal_sampling_tool_IT\\Output\\"
+inp_path <- "D:\\Google Drive\\ISPRA\\SML_sampling\\Input\\"
+out_path <- "D:\\Google Drive\\ISPRA\\SML_sampling\\Output\\"
 
-frame_in <- read.csv(paste0(inp_path, "Frame_1km_6_soil_units_Italy.csv"))
-legend_csv_path <- paste0(inp_path, "Test_6_soil_units_Italy_legend.csv")
+frame_in <- read.csv(paste0(inp_path, "Frame_1km_3_soil_units_Italy.csv"))
+legend_csv_path <- paste0(inp_path, "Test_3_soil_units_Italy_legend.csv")
 
 
 #----------------------------------------------------------------------------------------------------
@@ -171,7 +171,7 @@ spatial_component <- FALSE
 
 use_lucas_grid <- TRUE   # TRUE to flag the cells of the LUCAS grid (POINT_ID > 0)
 
-base_name <- "Test_6_soil_units_Italy"   # prefix of the output files
+base_name <- "Test_3_soil_units_Italy"   # prefix of the output files
 
 
 
