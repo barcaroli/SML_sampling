@@ -1,5 +1,5 @@
 SOIL MONITORING LAW (SML) - OPTIMAL SAMPLING: RESULTS SUMMARY
-Run date            : 2026-11-16 13:15
+Run date            : 2026-11-16 14:53
 Scenario            : Test_3_soil_units_Italy
 Domains             : 3 soil units
 Target variables    : PH, SOC (CV target = 5% in every domain)
@@ -19,10 +19,10 @@ Sample size per domain:
 
  domain     soil unit strata sample size
       1 60.4_Cropland      3        20.6
-      2   60.4_Forest      2        13.1
-      3 60.7_Cropland      2        19.9
+      2   60.4_Forest      2        13.4
+      3 60.7_Cropland      2        19.7
 
-TOTAL (GA result) : 53.6 units in 7 strata
+TOTAL (GA result) : 53.7 units in 7 strata
 
 ==============================================================================
 3. REDUCTION DUE TO THE SPATIAL COMPONENT (Phase 5b)
@@ -33,19 +33,19 @@ Not performed (spatial_component = FALSE).
 4. FINAL SAMPLE
 ==============================================================================
 Total sites selected : 53
-  sampled           : 38
-  sampled (LUCAS grid): 15
+  sampled           : 44
+  sampled (LUCAS grid): 9
 
 Expected CV per domain (target 5%), maximum over domains:
-  cv_PH : 0.0253
+  cv_PH : 0.0248
   cv_SOC : 0.0500
 
 Sites per domain (domains with at least 2 cells are stratified):
 
      soil_unit n_cell dom_val n_tot n_lucas_grid
- 60.4_Cropland    682    TRUE    20            7
-   60.4_Forest   1259    TRUE    13            3
- 60.7_Cropland    935    TRUE    20            5
+ 60.4_Cropland    682    TRUE    21            6
+   60.4_Forest   1259    TRUE    13            1
+ 60.7_Cropland    935    TRUE    19            2
 
 ==============================================================================
 5. OTHER NOTES
