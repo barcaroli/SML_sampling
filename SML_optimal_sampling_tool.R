@@ -476,6 +476,54 @@ nstrat        <- pmin(nstrat, max_feasible)
 nstrat        <- pmax(nstrat, 2L)   # at least 2 strata per domain
 
 # ---------------------------------------------------------------------------
+# Phase 4b -- Bethel allocation BEFORE the optimal stratification (baseline)
+#
+# Each domain is treated as one single stratum (no stratification) and the
+# Bethel allocation is computed for the CV constraints in cv, with the same
+# functions the GA uses internally (buildStrataDFSpatial + bethel_cpp).
+#   n_bethel_nostrat         : non-spatial (range = 0), i.e. simple random
+#                              sampling within each domain;
+#   n_bethel_nostrat_spatial : (only if spatial_component = TRUE) with the
+#                              range/nugget of the domain from the legend.
+# These sample sizes are compared in the report with those obtained after the
+# optimal stratification (Phase 5). Report only: nothing downstream changes.
+# ---------------------------------------------------------------------------
+buildStrataDFSpatial <- SamplingStrata:::buildStrataDFSpatial
+bethel_cpp           <- SamplingStrata:::bethel_cpp
+bethel_nostrat <- function(dv, range_m, nugget) {
+  sub <- frame[frame$domainvalue == dv, ]
+  sub$X1 <- 1L                  # one single stratum
+  sub$domainvalue <- 1L
+  colnames(sub) <- toupper(colnames(sub))
+  st <- buildStrataDFSpatial(dataset = sub[, c("ID", "X1", "LON", "LAT",
+                                               paste0("Y", seq_len(ny)), paste0("VAR", seq_len(ny)),
+                                               "DOMAINVALUE")],
+                             range = range_m, kappa = 1, nugget = nugget,
+                             progress = FALSE, verbose = FALSE)
+  st$DOM1 <- 1L
+  cv_dv <- cv[cv$domainvalue == dv, , drop = FALSE]
+  cv_dv$domainvalue <- 1L
+  tryCatch(sum(bethel_cpp(st, cv_dv, minnumstrat = min_sample_per_stratum,
+                          realAllocation = TRUE)),
+           error = function(e) NA_real_)
+}
+nostrat_log <- do.call(rbind, lapply(sort(unique(frame$domainvalue)), function(dv) {
+  data.frame(
+    domain = dv, dom_code = new_to_str[dv],
+    n_cells = sum(frame$domainvalue == dv),
+    n_bethel_nostrat = bethel_nostrat(dv, rep(0, ny), rep(0, ny)),
+    n_bethel_nostrat_spatial = if (spatial_component)
+      bethel_nostrat(dv, as.numeric(range_by_domain_m[as.character(dv), ]),
+                         as.numeric(nugget_by_domain[as.character(dv), ])) else NA_real_,
+    stringsAsFactors = FALSE)
+}))
+cat(sprintf("\nBethel allocation BEFORE stratification (1 stratum per domain): total sample size = %.1f%s\n",
+            sum(nostrat_log$n_bethel_nostrat, na.rm = TRUE),
+            if (spatial_component)
+              sprintf(" (non-spatial), %.1f (spatial)", sum(nostrat_log$n_bethel_nostrat_spatial, na.rm = TRUE))
+            else ""))
+
+# ---------------------------------------------------------------------------
 # Phase 5 -- Genetic algorithm (GA) optimisation of the stratification
 #
 # spatial_component = TRUE : the GA runs with the soil-unit range/nugget read
@@ -694,6 +742,42 @@ ga_out$n_ga <- round(ga_out$n_ga, 1)
 names(ga_out) <- c("domain", "soil unit", "strata", "sample size")
 addt(ga_out)
 add("\nTOTAL (GA result) : ", round(sum(outstrata_raw$SOLUZ), 1), " units in ", nrow(outstrata_raw), " strata")
+
+hdr("2b. SAMPLE SIZE WITHOUT vs WITH OPTIMAL STRATIFICATION (Phase 4b vs Phase 5)")
+add("Without stratification: Bethel allocation with one single stratum per domain (Phase 4b).")
+add("With stratification   : GA result (Phase 5).\n")
+cmp <- merge(nostrat_log[, c("domain", "dom_code", "n_bethel_nostrat", "n_bethel_nostrat_spatial")],
+             dom_tab[, c("domain", "n_strata_ga", "n_ga")], by = "domain")
+cmp$gain_vs_nostrat <- cmp$n_bethel_nostrat - cmp$n_ga
+cmp$gain_pct        <- 100 * cmp$gain_vs_nostrat / cmp$n_bethel_nostrat
+if (spatial_component) {
+  cmp$gain_vs_spatial <- cmp$n_bethel_nostrat_spatial - cmp$n_ga
+  cmp$gain_sp_pct     <- 100 * cmp$gain_vs_spatial / cmp$n_bethel_nostrat_spatial
+  cmp_out <- cmp[, c("domain", "dom_code", "n_bethel_nostrat", "n_bethel_nostrat_spatial",
+                     "n_strata_ga", "n_ga", "gain_vs_nostrat", "gain_pct", "gain_vs_spatial", "gain_sp_pct")]
+  names(cmp_out) <- c("domain", "soil unit", "n no strat (non-spatial)", "n no strat (spatial)",
+                      "strata GA", "n GA (spatial)", "saving vs non-spatial", "%", "saving vs spatial", "% sp")
+} else {
+  cmp_out <- cmp[, c("domain", "dom_code", "n_bethel_nostrat", "n_strata_ga", "n_ga",
+                     "gain_vs_nostrat", "gain_pct")]
+  names(cmp_out) <- c("domain", "soil unit", "n no strat", "strata GA", "n GA", "saving", "%")
+}
+num_cols <- sapply(cmp_out, is.numeric) & !(names(cmp_out) %in% c("domain", "strata GA"))
+cmp_out[num_cols] <- round(cmp_out[num_cols], 1)
+addt(cmp_out)
+tot_ns <- sum(nostrat_log$n_bethel_nostrat, na.rm = TRUE)
+tot_ga <- sum(outstrata_raw$SOLUZ)
+add("\nTOTAL, Bethel without stratification (non-spatial) : ", round(tot_ns, 1))
+if (spatial_component) {
+  tot_nss <- sum(nostrat_log$n_bethel_nostrat_spatial, na.rm = TRUE)
+  add("TOTAL, Bethel without stratification (spatial)     : ", round(tot_nss, 1))
+}
+add("TOTAL, optimal stratification (GA)                 : ", round(tot_ga, 1))
+add("Saving due to optimal stratification vs non-spatial: ", round(tot_ns - tot_ga, 1),
+    " units (", round(100 * (tot_ns - tot_ga) / tot_ns, 1), "%)")
+if (spatial_component)
+  add("Saving due to optimal stratification vs spatial    : ", round(tot_nss - tot_ga, 1),
+      " units (", round(100 * (tot_nss - tot_ga) / tot_nss, 1), "%)")
 
 hdr("3. REDUCTION DUE TO THE SPATIAL COMPONENT (Phase 5b)")
 if (!spatial_component) {
